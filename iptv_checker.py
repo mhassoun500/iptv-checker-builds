@@ -23,7 +23,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-VERSION = "5.1"
+VERSION = "5.2"
 UA = "VLC/3.0.20 LibVLC/3.0.20"
 DEFAULT_TIMEOUT = 15
 
@@ -2378,11 +2378,13 @@ def main():
         except KeyboardInterrupt:
             return
 
+    # وضع المتصفح: افتح في المتصفح الافتراضي مباشرة (--browser)
+    force_browser = '--browser' in sys.argv or '-b' in sys.argv
     # نافذة أصلية بوضع «التطبيق» من كروم/إيدج (محرك Chromium) — إغلاقها يُنهي البرنامج
-    if _open_chrome_app(url):
+    if not force_browser and _open_chrome_app(url):
         return
 
-    # بديل احتياطي: المتصفح الافتراضي
+    # المتصفح الافتراضي (الوضع العادي أو كبديل احتياطي)
     threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     try:
         while True:
