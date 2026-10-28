@@ -16,16 +16,10 @@ jobs:
         include:
           - os: windows-latest
             label: windows
-            ext: ".exe"
-            icon: "--icon app.ico"
           - os: macos-latest
             label: macos
-            ext: ""
-            icon: ""
           - os: ubuntu-latest
             label: linux
-            ext: ""
-            icon: ""
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -34,13 +28,55 @@ jobs:
           python-version: '3.12'
       - name: Install PyInstaller
         run: python -m pip install --upgrade pip pyinstaller
-      - name: Build standalone
-        run: pyinstaller --onefile --noconfirm --name IPTV_Checker ${{ matrix.icon }} iptv_checker.py
-      - name: Prepare output
+
+      # ---------- Windows: single .exe ----------
+      - name: Build (Windows)
+        if: matrix.label == 'windows'
+        run: pyinstaller --onefile --noconfirm --name IPTV_Checker --icon app.ico iptv_checker.py
+      - name: Package (Windows)
+        if: matrix.label == 'windows'
         shell: bash
         run: |
-          mkdir -p out
-          cp "dist/IPTV_Checker${{ matrix.ext }}" "out/IPTV_Checker-${{ matrix.label }}${{ matrix.ext }}"
+          mkdir out
+          cp "dist/IPTV_Checker.exe" "out/IPTV_Checker-windows.exe"
+
+      # ---------- macOS: proper .app bundle ----------
+      - name: Make .icns (macOS)
+        if: matrix.label == 'macos'
+        run: |
+          mkdir icon.iconset
+          sips -z 16 16     app.png --out icon.iconset/icon_16x16.png
+          sips -z 32 32     app.png --out icon.iconset/icon_16x16@2x.png
+          sips -z 32 32     app.png --out icon.iconset/icon_32x32.png
+          sips -z 64 64     app.png --out icon.iconset/icon_32x32@2x.png
+          sips -z 128 128   app.png --out icon.iconset/icon_128x128.png
+          sips -z 256 256   app.png --out icon.iconset/icon_128x128@2x.png
+          sips -z 256 256   app.png --out icon.iconset/icon_256x256.png
+          sips -z 512 512   app.png --out icon.iconset/icon_256x256@2x.png
+          sips -z 512 512   app.png --out icon.iconset/icon_512x512.png
+          cp app.png        icon.iconset/icon_512x512@2x.png
+          iconutil -c icns icon.iconset -o app.icns
+      - name: Build (macOS .app)
+        if: matrix.label == 'macos'
+        run: pyinstaller --windowed --noconfirm --name IPTV_Checker --icon app.icns iptv_checker.py
+      - name: Package (macOS)
+        if: matrix.label == 'macos'
+        run: |
+          mkdir out
+          # remove quarantine-triggering xattrs and zip preserving the .app structure/permissions
+          xattr -cr "dist/IPTV_Checker.app" || true
+          ditto -c -k --keepParent "dist/IPTV_Checker.app" "out/IPTV_Checker-macos.zip"
+
+      # ---------- Linux: single binary ----------
+      - name: Build (Linux)
+        if: matrix.label == 'linux'
+        run: pyinstaller --onefile --noconfirm --name IPTV_Checker iptv_checker.py
+      - name: Package (Linux)
+        if: matrix.label == 'linux'
+        run: |
+          mkdir out
+          cp "dist/IPTV_Checker" "out/IPTV_Checker-linux"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
