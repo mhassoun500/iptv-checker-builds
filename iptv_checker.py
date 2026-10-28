@@ -23,7 +23,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-VERSION = "5.3"
+VERSION = "5.4"
 UA = "VLC/3.0.20 LibVLC/3.0.20"
 DEFAULT_TIMEOUT = 15
 
@@ -1669,13 +1669,22 @@ function uuid(){
 function exportIptvnator(){
   const list = visible();
   if(!list.length) return toast('لا توجد سيرفرات للتصدير');
+  // iptvnator يطلب userState كاملاً لكل سيرفر؛ نملأ الحقول الناقصة مع الحفاظ على الموجود
+  const fullUserState = (r) => {
+    const us = (r.userState && typeof r.userState==='object') ? r.userState : {};
+    const t = r.type || r.portalType || 'xtream';
+    const base = (t==='m3u')
+      ? {favorites:[], recentlyViewed:[], hiddenGroupTitles:[]}
+      : {hiddenCategories:[], favorites:[], recentlyViewed:[], playbackPositions:[], sourcePins:[]};
+    return Object.assign(base, us);   // قيم المستخدم تبقى، والناقص يُملأ بمصفوفات فارغة
+  };
   const playlists = list.map((r,i) => {
     const t = r.type || r.portalType || 'xtream';
     const common = {
       portalType:t, exportedId:r.exportedId || uuid(),   // يحافظ على معرّف السيرفر الأصلي ليبقى ربط المفضلات سليماً
       title:((r.title&&r.title.trim()) ? r.title.trim() : (r.host||('سيرفر '+(i+1))).replace(/^https?:\/\//,'')),
       autoRefresh:r.autoRefresh!=null?r.autoRefresh:false, position:i,
-      userState:r.userState || {favorites:[], recentlyViewed:[]}   // افتراضي متوافق مع إصدارات iptvnator المختلفة
+      userState:fullUserState(r)
     };
     if(t==='stalker') return {...common, connection:{portalUrl:r.portal||r.host, macAddress:r.mac||r.username, isFullStalkerPortal:!!r.isFull}};
     if(t==='m3u') return {...common, source:{kind:r.m3uKind||'url', url:r.m3uurl||r.host, rawM3u:(r.rawM3u && r.rawM3u.length) ? r.rawM3u : '#EXTM3U\n'}};   // rawM3u صالح دائماً
