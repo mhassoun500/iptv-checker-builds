@@ -23,7 +23,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-VERSION = "5.4"
+VERSION = "5.5"
 UA = "VLC/3.0.20 LibVLC/3.0.20"
 DEFAULT_TIMEOUT = 15
 
@@ -1354,6 +1354,12 @@ const ORDER = {active:0,active_m3u:1,expired:2,blocked:3,invalid:4,offline:5,err
 let rows = [], seq = 0, stop = false, running = false, filter = 'all', renderQueued = false;
 
 const grp = s => (s==='active'||s==='active_m3u')?'ok':s==='expired'?'expired':(s==='invalid'||s==='blocked')?'bad':(s==='offline'||s==='error')?'offline':'pending';
+// الاسم الافتراضي للسيرفر: بدون بروتوكول، بدون مسار، بدون منفذ، وبدون امتداد الموقع (.com ..)
+function defaultName(host){
+  let h = String(host||'').replace(/^https?:\/\//i,'').replace(/\/.*$/,'').replace(/:\d+$/,'');
+  if(!/^\d{1,3}(\.\d{1,3}){3}$/.test(h)) h = h.replace(/\.[a-z]{2,}$/i,'');   // احذف الامتداد إلا لعناوين IP
+  return h;
+}
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const hasPort = h => /:\d+\/?$/.test(String(h||''));
 const stripPort = h => String(h||'').toLowerCase().replace(/\/+$/,'').replace(/:\d+$/,'');
@@ -1416,7 +1422,7 @@ function rowHtml(r, i){
     <td class="ltr">${conn}</td>
     <td class="ltr">${r.ping_ms!=null ? r.ping_ms+' ms' : '—'}</td>
     <td class="small note" title="${esc(r.message||'')}">${esc(r.message||'')}</td>
-    <td><input type="text" class="namein ltr" data-id="${r.id}" value="${esc(r.title||'')}" placeholder="${esc((r.host||'').replace(/^https?:\/\//,''))}" title="اسم السيرفر عند التصدير إلى iptvnator"></td>
+    <td><input type="text" class="namein ltr" data-id="${r.id}" value="${esc(r.title||'')}" placeholder="${esc(defaultName(r.host))}" title="اسم السيرفر عند التصدير إلى iptvnator (يُكتب تلقائياً إن تركته فارغاً)"></td>
     <td class="acts"><button class="icon" data-act="up" title="نقل للأعلى">▲</button><button class="icon" data-act="down" title="نقل للأسفل">▼</button><button class="icon" data-act="play" title="تشغيل / معاينة">▶️</button><button class="icon" data-act="copy" title="نسخ رابط M3U">📋</button><button class="icon" data-act="re" title="إعادة الفحص">🔁</button><button class="icon" data-act="del" title="حذف">✕</button></td>
   </tr>`;
 }
@@ -1682,7 +1688,7 @@ function exportIptvnator(){
     const t = r.type || r.portalType || 'xtream';
     const common = {
       portalType:t, exportedId:r.exportedId || uuid(),   // يحافظ على معرّف السيرفر الأصلي ليبقى ربط المفضلات سليماً
-      title:((r.title&&r.title.trim()) ? r.title.trim() : (r.host||('سيرفر '+(i+1))).replace(/^https?:\/\//,'')),
+      title:((r.title&&r.title.trim()) ? r.title.trim() : (defaultName(r.host) || ('سيرفر '+(i+1)))),
       autoRefresh:r.autoRefresh!=null?r.autoRefresh:false, position:i,
       userState:fullUserState(r)
     };
