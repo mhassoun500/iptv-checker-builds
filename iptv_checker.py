@@ -23,7 +23,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-VERSION = "5.2"
+VERSION = "5.3"
 UA = "VLC/3.0.20 LibVLC/3.0.20"
 DEFAULT_TIMEOUT = 15
 
@@ -485,13 +485,17 @@ def check_m3u(url, timeout=DEFAULT_TIMEOUT, proxy=''):
     """فحص رابط قائمة M3U مباشر: يعمل إن أرجع قائمة قنوات صالحة."""
     op = _opener_for(proxy)
     url = url.strip()
-    r = _blank_result(type='m3u', host=url, m3u=url)
+    r = _blank_result(type='m3u', host=url, m3u=url, rawM3u='')
     try:
-        _, data, ms = _get(url, timeout, limit=300000, opener=op)
+        _, data, ms = _get(url, timeout, limit=4_000_000, opener=op)   # اجلب المحتوى لتخزينه
         r['ping_ms'] = ms
         if b'#EXTM3U' in data or b'#EXTINF' in data:
             r['state'] = 'active_m3u'
             r['message'] = 'قائمة M3U تعمل'
+            txt = data.decode('utf-8', 'replace')
+            if '\n' in txt:
+                txt = txt[:txt.rfind('\n')]              # قُصّ عند آخر سطر كامل
+            r['rawM3u'] = txt[:3_000_000]                # خزّن محتوى القائمة لتصدير iptvnator سليم
         else:
             r['state'] = 'invalid'
             r['message'] = 'الرابط لا يُرجع قائمة M3U صالحة'
@@ -1671,10 +1675,10 @@ function exportIptvnator(){
       portalType:t, exportedId:r.exportedId || uuid(),   // يحافظ على معرّف السيرفر الأصلي ليبقى ربط المفضلات سليماً
       title:((r.title&&r.title.trim()) ? r.title.trim() : (r.host||('سيرفر '+(i+1))).replace(/^https?:\/\//,'')),
       autoRefresh:r.autoRefresh!=null?r.autoRefresh:false, position:i,
-      userState:r.userState || {hiddenCategories:[], favorites:[], recentlyViewed:[], playbackPositions:[]}   // يحافظ على المفضلات
+      userState:r.userState || {favorites:[], recentlyViewed:[]}   // افتراضي متوافق مع إصدارات iptvnator المختلفة
     };
     if(t==='stalker') return {...common, connection:{portalUrl:r.portal||r.host, macAddress:r.mac||r.username, isFullStalkerPortal:!!r.isFull}};
-    if(t==='m3u') return {...common, source:{kind:r.m3uKind||'url', url:r.m3uurl||r.host, rawM3u:r.rawM3u||''}};
+    if(t==='m3u') return {...common, source:{kind:r.m3uKind||'url', url:r.m3uurl||r.host, rawM3u:(r.rawM3u && r.rawM3u.length) ? r.rawM3u : '#EXTM3U\n'}};   // rawM3u صالح دائماً
     return {...common, connection:{serverUrl:r.host, username:r.username, password:r.password}};
   });
   const payload = {kind:'iptvnator-playlist-backup', version:1, exportedAt:new Date().toISOString(), includeSecrets:true, playlists};
