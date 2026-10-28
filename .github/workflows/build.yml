@@ -29,10 +29,10 @@ jobs:
       - name: Install PyInstaller
         run: python -m pip install --upgrade pip pyinstaller
 
-      # ---------- Windows: single .exe ----------
+      # ---------- Windows: single .exe, no console (native Chrome app window) ----------
       - name: Build (Windows)
         if: matrix.label == 'windows'
-        run: pyinstaller --onefile --noconfirm --name IPTV_Checker --icon app.ico iptv_checker.py
+        run: pyinstaller --onefile --windowed --noconfirm --name IPTV_Checker --icon app.ico iptv_checker.py
       - name: Package (Windows)
         if: matrix.label == 'windows'
         shell: bash
@@ -40,7 +40,7 @@ jobs:
           mkdir out
           cp "dist/IPTV_Checker.exe" "out/IPTV_Checker-windows.exe"
 
-      # ---------- macOS: proper .app bundle ----------
+      # ---------- macOS: proper .app bundle with icon ----------
       - name: Make .icns (macOS)
         if: matrix.label == 'macos'
         run: |
@@ -63,7 +63,6 @@ jobs:
         if: matrix.label == 'macos'
         run: |
           mkdir out
-          # remove quarantine-triggering xattrs and zip preserving the .app structure/permissions
           xattr -cr "dist/IPTV_Checker.app" || true
           ditto -c -k --keepParent "dist/IPTV_Checker.app" "out/IPTV_Checker-macos.zip"
 

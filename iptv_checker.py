@@ -23,7 +23,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-VERSION = "5.0"
+VERSION = "5.1"
 UA = "VLC/3.0.20 LibVLC/3.0.20"
 DEFAULT_TIMEOUT = 15
 
@@ -2367,12 +2367,82 @@ def main():
     print(f"  Open: {url}")
     print("  Keep this window open. Press Ctrl+C to stop.")
     print("=" * 52)
-    if '--no-browser' not in sys.argv:
-        threading.Timer(0.8, lambda: webbrowser.open(url)).start()
+
+    # شغّل الخادم في خيط خلفي ليبقى واجهة المستخدم مسيطرة
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+    if '--no-browser' in sys.argv:                      # وضع بلا واجهة
+        try:
+            while True:
+                time.sleep(3600)
+        except KeyboardInterrupt:
+            return
+
+    # نافذة أصلية بوضع «التطبيق» من كروم/إيدج (محرك Chromium) — إغلاقها يُنهي البرنامج
+    if _open_chrome_app(url):
+        return
+
+    # بديل احتياطي: المتصفح الافتراضي
+    threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     try:
-        srv.serve_forever()
+        while True:
+            time.sleep(3600)
     except KeyboardInterrupt:
         print("\nStopped.")
+
+
+def _find_chromium():
+    """يبحث عن متصفح مبني على Chromium: كروم ثم إيدج ثم Brave ثم Chromium."""
+    import shutil
+    cands = []
+    if sys.platform == 'darwin':
+        cands = ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+                 '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+                 '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+                 '/Applications/Chromium.app/Contents/MacOS/Chromium']
+    elif sys.platform.startswith('win'):
+        pf = os.environ.get('ProgramFiles', r'C:\Program Files')
+        pf86 = os.environ.get('ProgramFiles(x86)', r'C:\Program Files (x86)')
+        la = os.environ.get('LOCALAPPDATA', '')
+        cands = [pf + r'\Google\Chrome\Application\chrome.exe',
+                 pf86 + r'\Google\Chrome\Application\chrome.exe',
+                 (la + r'\Google\Chrome\Application\chrome.exe') if la else '',
+                 pf + r'\Microsoft\Edge\Application\msedge.exe',
+                 pf86 + r'\Microsoft\Edge\Application\msedge.exe',
+                 pf + r'\BraveSoftware\Brave-Browser\Application\brave.exe']
+    else:
+        for n in ('google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser',
+                  'brave-browser', 'microsoft-edge'):
+            p = shutil.which(n)
+            if p:
+                cands.append(p)
+    for c in cands:
+        if c and os.path.exists(c):
+            return c
+    for n in ('google-chrome', 'chromium', 'chrome', 'msedge', 'brave'):
+        p = shutil.which(n)
+        if p:
+            return p
+    return None
+
+
+def _open_chrome_app(url):
+    """يفتح النافذة بوضع التطبيق (--app) ويبقى حتى تُغلق النافذة."""
+    chrome = _find_chromium()
+    if not chrome:
+        return False
+    import tempfile
+    import subprocess
+    profile = os.path.join(tempfile.gettempdir(), 'iptv_checker_profile')
+    args = [chrome, f'--app={url}', f'--user-data-dir={profile}',
+            '--window-size=1360,880', '--no-first-run', '--no-default-browser-check',
+            '--disable-features=Translate']
+    try:
+        proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        proc.wait()                                     # ينتظر حتى تُغلق النافذة
+        return True
+    except Exception:
+        return False
 
 
 if __name__ == '__main__':
