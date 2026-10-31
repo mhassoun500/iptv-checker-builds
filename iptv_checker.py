@@ -23,7 +23,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-VERSION = "5.7"
+VERSION = "5.8"
 UA = "VLC/3.0.20 LibVLC/3.0.20"
 DEFAULT_TIMEOUT = 15
 
@@ -1186,6 +1186,10 @@ tr.drop-into td{box-shadow:inset 0 2px 0 var(--acc)}
 .namein{width:100%;min-width:70px;background:#0a0e12;border:1px solid var(--line);color:var(--text);border-radius:6px;padding:5px 7px;font-weight:600}
 .namein:hover{border-color:var(--mute)}
 .namein:focus{background:#0a0e12;border-color:var(--acc);outline:none}
+.datain{width:100%;min-width:80px;background:transparent;border:1px solid transparent;color:var(--text);border-radius:6px;padding:4px 6px;font:inherit;font-size:13px}
+.datain:hover{border-color:var(--line);background:#0a0e12}
+.datain:focus{background:#0a0e12;border-color:var(--acc);outline:none}
+td.hostcell{min-width:200px}
 /* عرض الأعمدة — المجموع 100% ليتّسع الجدول دون تمرير */
 col.c-num{width:3%} col.c-state{width:9%} col.c-host{width:12%} col.c-user{width:10%}
 col.c-pass{width:8%} col.c-exp{width:9%} col.c-days{width:6%} col.c-conn{width:6%}
@@ -1444,9 +1448,9 @@ function rowHtml(r, i){
   return `<tr data-id="${r.id}" draggable="true" class="${di&&di.best?'bestrow':''} ${r.viaProxy?'viarow':''}">
     <td class="drag" title="اسحب لإعادة الترتيب">⠿ ${i+1}</td>
     <td><span class="b ${cls}">${lbl}</span></td>
-    <td class="ltr host" title="${esc(r.host)}">${viaBadge}${dupBadge}${esc(r.host)}</td>
-    <td class="ltr">${esc(r.username)}</td>
-    <td class="ltr">${esc(r.password)}</td>
+    <td class="ltr hostcell">${viaBadge}${dupBadge}<input type="text" class="datain ltr" data-id="${r.id}" data-f="host" value="${esc(r.host)}" title="عنوان السيرفر — عدّله ثم اضغط إعادة الفحص 🔁"></td>
+    <td><input type="text" class="datain ltr" data-id="${r.id}" data-f="username" value="${esc(r.username)}" title="اسم المستخدم — عدّله ثم اضغط إعادة الفحص 🔁"></td>
+    <td><input type="text" class="datain ltr" data-id="${r.id}" data-f="password" value="${esc(r.password)}" title="كلمة المرور — عدّلها ثم اضغط إعادة الفحص 🔁"></td>
     <td class="ltr">${exp}</td>
     <td>${daysTxt(r)}</td>
     <td class="ltr">${conn}</td>
@@ -2136,8 +2140,23 @@ $('#btnDedup').onclick = () => {
   msg(`تم حذف ${removed} سيرفراً مكرراً، مع إبقاء الأفضل في كل مجموعة.`);
 };
 $('#tb').addEventListener('input', e => {        // تعديل اسم السيرفر للتصدير إلى iptvnator
-  const el = e.target.closest('.namein'); if(!el) return;
-  const r = rows.find(x => x.id === +el.dataset.id); if(r) r.title = el.value;
+  const nm = e.target.closest('.namein');
+  if(nm){ const r = rows.find(x => x.id === +nm.dataset.id); if(r) r.title = nm.value; return; }
+  // تعديل البيانات المدخلة (العنوان / المستخدم / كلمة المرور) مباشرة من الجدول
+  const el = e.target.closest('.datain'); if(!el) return;
+  const r = rows.find(x => x.id === +el.dataset.id); if(!r) return;
+  const f = el.dataset.f, v = el.value.trim();
+  if(f === 'host'){
+    r.host = v;
+    if(r.type === 'stalker') r.portal = v;         // أبقِ حقل البوابة متوافقاً
+    if(r.type === 'm3u'){ r.m3uurl = v; r.rawM3u = ''; }   // رابط M3U جديد ⇒ أعد جلب المحتوى عند الفحص
+  } else if(f === 'username'){
+    r.username = v;
+    if(r.type === 'stalker') r.mac = v.toUpperCase();
+  } else if(f === 'password'){
+    r.password = v;
+  }
+  r.m3u = '';                                      // رابط get.php القديم لم يعد صالحاً بعد التعديل
 });
 
 // ---------------- الترتيب اليدوي بالسحب ----------------
