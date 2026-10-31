@@ -23,7 +23,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-VERSION = "5.6"
+VERSION = "5.7"
 UA = "VLC/3.0.20 LibVLC/3.0.20"
 DEFAULT_TIMEOUT = 15
 
@@ -226,9 +226,30 @@ def extract(text):
         if st['user'] and st['pass']:                   # الهوست أتى أخيراً → اكتمل
             flush(st['host'])
 
-    for raw in (text or '').splitlines():
-        line = (raw.replace('‏', '').replace('‎', '')
-                .replace('﻿', '').replace('‍', '').strip())
+    clines = [(raw.replace('‏', '').replace('‎', '')
+               .replace('﻿', '').replace('‍', '').strip())
+              for raw in (text or '').splitlines()]
+
+    def _mac_block_has_pass(i):
+        # قاعدة: طالما يوجد باسورد في نفس الكتلة ⇒ السيرفر Xtream وليس Stalker
+        # (Stalker لا يستخدم باسورد، بل MAC فقط). نبحث عن الباسورد قبل أو بعد سطر الـ MAC.
+        if st['pass']:                                # باسورد مُلتقط قبل الـ MAC
+            return True
+        m0 = RE_PASS.search(clines[i])                # باسورد في نفس سطر الـ MAC
+        if m0:
+            return bool(_tok(m0.group(1)))
+        for j in range(i + 1, len(clines)):           # ابحث للأمام حتى حدّ الكتلة
+            lj = clines[j]
+            if not lj:
+                continue
+            mp = RE_PASS.search(lj)
+            if mp:
+                return bool(_tok(mp.group(1)))
+            if URL_RE.search(lj) or RE_USER.search(lj) or mac_re.search(lj):
+                return False                          # بدأت كتلة/سيرفر جديد بلا باسورد
+        return False
+
+    for i, line in enumerate(clines):
         if not line or line.startswith('#EXTINF'):
             continue
         if re.search(r'user[\s_-]*agent', line, re.I):
@@ -239,7 +260,7 @@ def extract(text):
         line_urls = URL_RE.findall(line)
         if line_urls:
             pending_portal['u'] = line_urls[0]        # تذكّر آخر رابط كبوابة محتملة لأي MAC لاحق
-        if macs:
+        if macs and not _mac_block_has_pass(i):        # MAC بلا باسورد ⇒ Stalker؛ مع باسورد ⇒ يُكمَل كـ Xtream
             portal = None
             for u in line_urls:                       # فضّل رابطاً يبدو كبوابة
                 if re.search(r'portal\.php|/c/|/stalker|/server/load\.php', u, re.I):
@@ -254,7 +275,7 @@ def extract(text):
                 pending_portal['u'] = None
             else:
                 pending_mac['m'] = macs[0]            # MAC قبل الهوست → انتظر رابطاً لاحقاً
-            continue                                   # سطر فيه MAC لا يُعامل كـ Xtream
+            continue                                   # سطر فيه MAC بلا باسورد لا يُعامل كـ Xtream
         if pending_mac['m'] and line_urls:            # وصل الهوست بعد MAC سابق
             add_stalker(line_urls[0], pending_mac['m'])
             pending_mac['m'] = None
