@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-IPTV Checker - فاحص سيرفرات IPTV
----------------------------------
+Mo IPTV Checker - فاحص سيرفرات IPTV
+-----------------------------------
 التشغيل:            python iptv_checker.py        (تفتح الواجهة في المتصفح تلقائياً)
 وضع سطر الأوامر:    python iptv_checker.py servers.txt
 المتطلبات: Python 3.8 أو أحدث فقط - لا يحتاج أي مكتبات إضافية.
@@ -23,7 +23,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-VERSION = "5.5"
+VERSION = "5.6"
 UA = "VLC/3.0.20 LibVLC/3.0.20"
 DEFAULT_TIMEOUT = 15
 
@@ -1114,7 +1114,7 @@ HTML = r"""<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>فاحص سيرفرات IPTV</title>
+<title>Mo IPTV Checker</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230e1318'/%3E%3Cpath d='M20 22a24 24 0 0 1 24 24' fill='none' stroke='%2322c55e' stroke-width='4' stroke-linecap='round'/%3E%3Cpath d='M20 32a14 14 0 0 1 14 14' fill='none' stroke='%233b82f6' stroke-width='4' stroke-linecap='round'/%3E%3Ccircle cx='21' cy='45' r='4.5' fill='%233b82f6'/%3E%3Cpath d='M34 17l17 9.5-17 9.5z' fill='%23e6edf3'/%3E%3C/svg%3E">
 <script>window.__PROXY__=__PROXYJSON__;</script>
 <style>
@@ -1162,9 +1162,9 @@ tr.drop-into td{box-shadow:inset 0 2px 0 var(--acc)}
 .ltr{direction:ltr;unicode-bidi:isolate;font-family:Consolas,"Courier New",monospace;word-break:break-all}
 .host{overflow-wrap:anywhere}
 .acts{white-space:nowrap}
-.namein{width:100%;min-width:70px;background:transparent;border:1px solid transparent;color:var(--text);border-radius:6px;padding:5px 7px}
-.namein:hover{border-color:var(--line)}
-.namein:focus{background:#0a0e12;border-color:var(--acc)}
+.namein{width:100%;min-width:70px;background:#0a0e12;border:1px solid var(--line);color:var(--text);border-radius:6px;padding:5px 7px;font-weight:600}
+.namein:hover{border-color:var(--mute)}
+.namein:focus{background:#0a0e12;border-color:var(--acc);outline:none}
 /* عرض الأعمدة — المجموع 100% ليتّسع الجدول دون تمرير */
 col.c-num{width:3%} col.c-state{width:9%} col.c-host{width:12%} col.c-user{width:10%}
 col.c-pass{width:8%} col.c-exp{width:9%} col.c-days{width:6%} col.c-conn{width:6%}
@@ -1203,8 +1203,17 @@ body.drag main{outline:3px dashed var(--acc);outline-offset:-8px;border-radius:1
 </head>
 <body>
 <header>
-  <h1>📡 فاحص سيرفرات <span class="ltr">IPTV</span></h1>
-  <span class="small">يعمل محلياً على جهازك — الإصدار <span class="ltr">__VER__</span></span>
+  <svg class="logo" viewBox="0 0 64 64" width="40" height="40" aria-hidden="true">
+    <rect width="64" height="64" rx="14" fill="#0e1318"/>
+    <path d="M20 22a24 24 0 0 1 24 24" fill="none" stroke="#22c55e" stroke-width="4" stroke-linecap="round"/>
+    <path d="M20 32a14 14 0 0 1 14 14" fill="none" stroke="#3b82f6" stroke-width="4" stroke-linecap="round"/>
+    <circle cx="21" cy="45" r="4.5" fill="#3b82f6"/>
+    <path d="M34 17l17 9.5-17 9.5z" fill="#e6edf3"/>
+  </svg>
+  <div>
+    <h1 class="ltr" style="letter-spacing:.3px">Mo <span style="color:var(--acc)">IPTV</span> Checker</h1>
+    <span class="small">فاحص سيرفرات IPTV — يعمل محلياً على جهازك — الإصدار <span class="ltr">__VER__</span></span>
+  </div>
 </header>
 <main>
 <div class="card">
@@ -1422,7 +1431,7 @@ function rowHtml(r, i){
     <td class="ltr">${conn}</td>
     <td class="ltr">${r.ping_ms!=null ? r.ping_ms+' ms' : '—'}</td>
     <td class="small note" title="${esc(r.message||'')}">${esc(r.message||'')}</td>
-    <td><input type="text" class="namein ltr" data-id="${r.id}" value="${esc(r.title||'')}" placeholder="${esc(defaultName(r.host))}" title="اسم السيرفر عند التصدير إلى iptvnator (يُكتب تلقائياً إن تركته فارغاً)"></td>
+    <td><input type="text" class="namein ltr" data-id="${r.id}" value="${esc(r.title || defaultName(r.host))}" placeholder="${esc(defaultName(r.host))}" title="اسم السيرفر عند التصدير إلى iptvnator — مكتوب تلقائياً ويمكنك التعديل عليه"></td>
     <td class="acts"><button class="icon" data-act="up" title="نقل للأعلى">▲</button><button class="icon" data-act="down" title="نقل للأسفل">▼</button><button class="icon" data-act="play" title="تشغيل / معاينة">▶️</button><button class="icon" data-act="copy" title="نسخ رابط M3U">📋</button><button class="icon" data-act="re" title="إعادة الفحص">🔁</button><button class="icon" data-act="del" title="حذف">✕</button></td>
   </tr>`;
 }
@@ -2382,7 +2391,7 @@ def main():
         return
     url = f"http://127.0.0.1:{srv.server_address[1]}/"
     print("=" * 52)
-    print(f"  IPTV Checker v{VERSION} is running")
+    print(f"  Mo IPTV Checker v{VERSION} is running")
     print(f"  Open: {url}")
     print("  Keep this window open. Press Ctrl+C to stop.")
     print("=" * 52)

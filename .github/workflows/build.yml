@@ -1,4 +1,4 @@
-name: Build IPTV Checker
+name: Build Mo IPTV Checker
 
 on:
   push:
@@ -29,18 +29,77 @@ jobs:
       - name: Install PyInstaller
         run: python -m pip install --upgrade pip pyinstaller
 
-      # ---------- Windows: single .exe, no console (native Chrome app window) ----------
+      # ============================================================
+      # Windows: portable .exe  +  Setup.exe installer (Inno Setup)
+      # ============================================================
       - name: Build (Windows)
         if: matrix.label == 'windows'
-        run: pyinstaller --onefile --windowed --noconfirm --name IPTV_Checker --icon app.ico iptv_checker.py
+        run: pyinstaller --onefile --windowed --noconfirm --name "Mo IPTV Checker" --icon app.ico iptv_checker.py
+
+      - name: Make Inno Setup script (Windows)
+        if: matrix.label == 'windows'
+        shell: bash
+        run: |
+          V=$(python -c "import re;print(re.search(r'VERSION\\s*=\\s*\"([^\"]+)\"',open('iptv_checker.py',encoding='utf-8').read()).group(1))")
+          echo "Building installer for version $V"
+          cat > installer.iss <<ISS
+          #define AppName "Mo IPTV Checker"
+          #define AppVersion "$V"
+          #define AppExe "Mo IPTV Checker.exe"
+
+          [Setup]
+          AppName={#AppName}
+          AppVersion={#AppVersion}
+          AppPublisher=mhassoun500
+          DefaultDirName={autopf}\\Mo IPTV Checker
+          DefaultGroupName=Mo IPTV Checker
+          UninstallDisplayIcon={app}\\{#AppExe}
+          OutputBaseFilename=Mo IPTV Checker Setup
+          OutputDir=installer_out
+          SetupIconFile=app.ico
+          Compression=lzma2
+          SolidCompression=yes
+          ArchitecturesInstallIn64BitMode=x64compatible
+          WizardStyle=modern
+          DisableProgramGroupPage=yes
+
+          [Languages]
+          Name: "en"; MessagesFile: "compiler:Default.isl"
+
+          [Tasks]
+          Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"
+
+          [Files]
+          Source: "dist\\Mo IPTV Checker.exe"; DestDir: "{app}"; Flags: ignoreversion
+
+          [Icons]
+          Name: "{group}\\Mo IPTV Checker"; Filename: "{app}\\{#AppExe}"
+          Name: "{autodesktop}\\Mo IPTV Checker"; Filename: "{app}\\{#AppExe}"; Tasks: desktopicon
+
+          [Run]
+          Filename: "{app}\\{#AppExe}"; Description: "Launch Mo IPTV Checker"; Flags: nowait postinstall skipifsilent
+          ISS
+
+      - name: Install Inno Setup (Windows)
+        if: matrix.label == 'windows'
+        run: choco install innosetup --no-progress -y
+
+      - name: Compile installer (Windows)
+        if: matrix.label == 'windows'
+        shell: cmd
+        run: '"%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" installer.iss'
+
       - name: Package (Windows)
         if: matrix.label == 'windows'
         shell: bash
         run: |
           mkdir out
-          cp "dist/IPTV_Checker.exe" "out/IPTV_Checker-windows.exe"
+          cp "dist/Mo IPTV Checker.exe" "out/Mo IPTV Checker-windows.exe"
+          cp "installer_out/Mo IPTV Checker Setup.exe" "out/Mo IPTV Checker Setup.exe"
 
-      # ---------- macOS: proper .app bundle with icon ----------
+      # ============================================================
+      # macOS: .app bundle  +  .dmg installer
+      # ============================================================
       - name: Make .icns (macOS)
         if: matrix.label == 'macos'
         run: |
@@ -56,28 +115,42 @@ jobs:
           sips -z 512 512   app.png --out icon.iconset/icon_512x512.png
           cp app.png        icon.iconset/icon_512x512@2x.png
           iconutil -c icns icon.iconset -o app.icns
+
       - name: Build (macOS .app)
         if: matrix.label == 'macos'
-        run: pyinstaller --windowed --noconfirm --name IPTV_Checker --icon app.icns iptv_checker.py
-      - name: Package (macOS)
+        run: pyinstaller --windowed --noconfirm --name "Mo IPTV Checker" --icon app.icns iptv_checker.py
+
+      - name: Build .dmg (macOS)
         if: matrix.label == 'macos'
         run: |
+          xattr -cr "dist/Mo IPTV Checker.app" || true
+          mkdir -p dmg_stage
+          cp -R "dist/Mo IPTV Checker.app" "dmg_stage/Mo IPTV Checker.app"
+          ln -s /Applications "dmg_stage/Applications"
           mkdir out
-          xattr -cr "dist/IPTV_Checker.app" || true
-          ditto -c -k --keepParent "dist/IPTV_Checker.app" "out/IPTV_Checker-macos.zip"
+          hdiutil create -volname "Mo IPTV Checker" \
+            -srcfolder dmg_stage -ov -format UDZO \
+            "out/Mo IPTV Checker.dmg"
 
-      # ---------- Linux: single binary ----------
+      - name: Package .zip too (macOS)
+        if: matrix.label == 'macos'
+        run: |
+          ditto -c -k --keepParent "dist/Mo IPTV Checker.app" "out/Mo IPTV Checker-macos.zip"
+
+      # ============================================================
+      # Linux: single binary
+      # ============================================================
       - name: Build (Linux)
         if: matrix.label == 'linux'
-        run: pyinstaller --onefile --noconfirm --name IPTV_Checker iptv_checker.py
+        run: pyinstaller --onefile --noconfirm --name Mo_IPTV_Checker iptv_checker.py
       - name: Package (Linux)
         if: matrix.label == 'linux'
         run: |
           mkdir out
-          cp "dist/IPTV_Checker" "out/IPTV_Checker-linux"
+          cp "dist/Mo_IPTV_Checker" "out/Mo_IPTV_Checker-linux"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: IPTV_Checker-${{ matrix.label }}
+          name: Mo_IPTV_Checker-${{ matrix.label }}
           path: out/*

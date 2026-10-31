@@ -1,14 +1,25 @@
-# IPTV Checker — فاحص سيرفرات IPTV
+# Mo IPTV Checker — فاحص سيرفرات IPTV
 
-أداة محلية لفحص سيرفرات IPTV (Xtream / Stalker-MAC / M3U).
+أداة محلية لفحص سيرفرات
+IPTV
+(Xtream / Stalker-MAC / M3U).
 
-## تنزيل النسخة الجاهزة (بدون تثبيت Python)
+## تنزيل التطبيق الجاهز (بدون تثبيت Python)
 افتح تبويب **Actions** بالأعلى، اختر آخر تشغيل ناجح، وانزل إلى قسم **Artifacts**:
-- `IPTV_Checker-windows` — ملف `.exe` لويندوز
-- `IPTV_Checker-macos` — برنامج ماك
-- `IPTV_Checker-linux` — برنامج لينكس
 
-فك الضغط وشغّل بالنقر المزدوج. على ماك: أول مرة زر يمين ثم Open.
+- `Mo_IPTV_Checker-windows` — يحتوي على:
+  - `Mo IPTV Checker Setup.exe` — ملف تثبيت كامل لويندوز (ثبّت ثم شغّل من قائمة ابدأ)
+  - `Mo IPTV Checker-windows.exe` — نسخة محمولة تعمل مباشرة بدون تثبيت
+- `Mo_IPTV_Checker-macos` — يحتوي على:
+  - `Mo IPTV Checker.dmg` — ملف تثبيت لماك (افتحه واسحب التطبيق إلى Applications)
+  - `Mo IPTV Checker-macos.zip` — نسخة التطبيق المضغوطة
+- `Mo_IPTV_Checker-linux` — برنامج لينكس
+
+على ماك أول مرة: زر يمين على التطبيق ثم
+Open
+(لتجاوز تحذير
+Gatekeeper
+لأن التطبيق غير موقّع).
 
 ## التشغيل من المصدر
 ```
