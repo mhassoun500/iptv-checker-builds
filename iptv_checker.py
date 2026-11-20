@@ -32,7 +32,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-VERSION = "6.3"
+VERSION = "6.4"
 UA = "VLC/3.0.20 LibVLC/3.0.20"
 DEFAULT_TIMEOUT = 15
 
@@ -488,9 +488,17 @@ _UAS = (UA, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML
         'okhttp/3.12.1')
 
 
+_TL = threading.local()
+
+
+def _cur_ua():
+    """ترويسة User-Agent المخصصة للسيرفر الجاري التعامل معه (إن حدّدها المستخدم)."""
+    return getattr(_TL, 'ua', '') or ''
+
+
 def _get(url, timeout, limit=8_000_000, opener=None, ua=None):
     op = opener or _OPENER
-    req = urllib.request.Request(url, headers={'User-Agent': ua or UA, 'Accept': '*/*', 'Connection': 'close'})
+    req = urllib.request.Request(url, headers={'User-Agent': ua or _cur_ua() or UA, 'Accept': '*/*', 'Connection': 'close'})
     t0 = time.time()
     with op.open(req, timeout=timeout) as r:
         data = r.read(limit)
@@ -626,7 +634,7 @@ def _api_fetch(host, qs, timeout, op):
         h = cands[ci]
         ci += 1
         net_err = False
-        for ua in _UAS:
+        for ua in (((_cur_ua(),) + _UAS) if _cur_ua() else _UAS):
             try:
                 _, data, ms = _get(f"{h}/player_api.php?{qs}", timeout, opener=op, ua=ua)
                 return data, ms, h
@@ -778,7 +786,7 @@ def check_stalker(portal, mac, timeout=DEFAULT_TIMEOUT, proxy=''):
     r = _blank_result(type='stalker', host=portal, username=mac)
 
     def g(url, token=None):
-        h = {'User-Agent': _STALKER_UA, 'Accept': '*/*',
+        h = {'User-Agent': _cur_ua() or _STALKER_UA, 'Accept': '*/*',
              'Cookie': f'mac={mac}; stb_lang=en; timezone=America/New_York',
              'X-User-Agent': 'Model: MAG250; Link: WiFi', 'Referer': base}
         if token:
@@ -1250,7 +1258,7 @@ def _proxy_sources(cc):
 
 
 def _fetch_text(url, opener, timeout=15, limit=5_000_000):
-    with opener.open(urllib.request.Request(url, headers={'User-Agent': UA}), timeout=timeout) as r:
+    with opener.open(urllib.request.Request(url, headers={'User-Agent': _cur_ua() or UA}), timeout=timeout) as r:
         return r.read(limit).decode('utf-8', 'replace')
 
 
@@ -1276,7 +1284,7 @@ def _test_proxy_hp(hp, timeout=6):
     try:
         op = _build_opener('http://' + hp)
         with op.open(urllib.request.Request('http://api.ipify.org/?format=json',
-                                            headers={'User-Agent': UA}), timeout=timeout) as r:
+                                            headers={'User-Agent': _cur_ua() or UA}), timeout=timeout) as r:
             return json.loads(r.read(2000).decode('utf-8', 'replace')).get('ip')
     except Exception:
         return None
@@ -1385,8 +1393,8 @@ def reg_server(d):
     srv = {'type': t, 'proxy': str(d.get('proxy') or '').strip(),
            'host': str(d.get('host') or d.get('portal') or d.get('url') or '').strip().rstrip('/'),
            'username': str(d.get('username') or ''), 'password': str(d.get('password') or ''),
-           'mac': str(d.get('mac') or '').strip().upper()}
-    sid = hashlib.sha1('|'.join([t, srv['host'], srv['username'], srv['password'], srv['mac'], srv['proxy']])
+           'mac': str(d.get('mac') or '').strip().upper(), 'ua': str(d.get('ua') or '').strip()[:300]}
+    sid = hashlib.sha1('|'.join([t, srv['host'], srv['username'], srv['password'], srv['mac'], srv['proxy'], srv['ua']])
                        .encode('utf-8')).hexdigest()[:12]
     with _REG_LOCK:
         _REG[sid] = srv
@@ -1458,7 +1466,7 @@ def _probe_sample(url, op, timeout, read_secs=4.0, max_bytes=700_000):
     res = {'ok': False, 'ttfb': None, 'kbps': None, 'why': ''}
     t0 = time.time()
     try:
-        resp = op.open(urllib.request.Request(url, headers={'User-Agent': UA, 'Accept': '*/*', 'Connection': 'close'}),
+        resp = op.open(urllib.request.Request(url, headers={'User-Agent': _cur_ua() or UA, 'Accept': '*/*', 'Connection': 'close'}),
                        timeout=timeout)
     except urllib.error.HTTPError as e:
         res['why'] = _http_reason(e.code)
@@ -1651,7 +1659,7 @@ def _st_base(portal):
 def _st_req(portal, mac, qs, token=None, timeout=15, proxy=''):
     op = _opener_for(proxy)
     base, sep = _st_base(portal)
-    h = {'User-Agent': _STALKER_UA, 'Accept': '*/*',
+    h = {'User-Agent': _cur_ua() or _STALKER_UA, 'Accept': '*/*',
          'Cookie': f'mac={mac}; stb_lang=en; timezone=America/New_York',
          'X-User-Agent': 'Model: MAG250; Link: WiFi', 'Referer': base}
     if token:
@@ -2180,7 +2188,7 @@ def rewrite_hls(text, base_url, wrap):
 def open_upstream(url, srv, rng=None, timeout=20):
     op = _opener_for(srv.get('proxy', ''))
     err = None
-    for ua in (UA, 'Mozilla/5.0', ''):
+    for ua in [x for x in (srv.get('ua') or _cur_ua(),) if x] + [UA, 'Mozilla/5.0', '']:
         headers = {'Accept': '*/*', 'Connection': 'close'}
         if ua:
             headers['User-Agent'] = ua
@@ -2398,6 +2406,7 @@ body.nfs #pvVideo{width:100vw;height:100vh;max-height:100vh;border-radius:0}
 #ov .modal{height:96vh}
 #ov .mlist .chlist{flex:1;min-height:200px;max-height:none}
 body.compact #inCard{display:none}
+#uam,#chm{z-index:60}
 @media(min-width:1900px){body{font-size:15px}table{font-size:14px}}
 @media(max-width:760px){.mbody{flex-direction:column}.mlist{max-width:none}.ov video{max-height:40vh}}
 </style>
@@ -2541,6 +2550,7 @@ http://example.com:8080/live/USER/PASS/12345.ts"></textarea>
     <button class="sec" id="bkIptv">📤 iptvnator</button>
     <button class="sec" id="bkM3u">📃 ملف M3U</button>
     <button class="sec" id="bkLinks">📋 نسخ الروابط</button>
+    <button class="sec" id="bkUa">🪪 هوية المشغّل</button>
     <button class="danger" id="bkDel">🗑 حذف المحدد</button>
     <button class="sec" id="bkClear">إلغاء التحديد</button>
   </div>
@@ -2587,6 +2597,7 @@ http://example.com:8080/live/USER/PASS/12345.ts"></textarea>
           <button class="tab" data-k="series">📂 مسلسلات</button>
           <button class="tab" data-k="fav">⭐</button>
           <button class="tab" data-k="recent">🕘</button>
+          <button class="tab" data-k="all" title="بحث شامل في القنوات والأفلام والمسلسلات">🔎 الكل</button>
         </div>
         <button class="sec" id="pvBack" style="display:none">↪ رجوع لقائمة المسلسلات</button>
         <div class="row2"><input type="search" id="pvQ" placeholder="ابحث..."><button class="sec" id="pvRefresh" title="إعادة جلب القوائم من السيرفر">🔄</button></div>
@@ -2599,6 +2610,28 @@ http://example.com:8080/live/USER/PASS/12345.ts"></textarea>
 </div>
 
 <div class="menu" id="fmenu"></div>
+
+<div class="ov" id="uam"><div class="modal sm">
+  <div class="mhead"><b>🪪 هوية المشغّل (User-Agent)</b><span class="small" id="uamFor" style="flex:1"></span><button class="danger" id="uamClose">إغلاق ✕</button></div>
+  <div class="mpad">
+    <div class="hint">بعض السيرفرات ترفض الاتصال إلا من مشغّلات معيّنة. اختر الهوية التي يتصل بها البرنامج بهذا السيرفر في الفحص والمشغّل وجلب القنوات.</div>
+    <div class="fld"><label>الهوية</label><select id="uaSel">
+      <option value="">تلقائي (الافتراضي — يجرّب أكثر من هوية)</option>
+      <option value="VLC/3.0.20 LibVLC/3.0.20">VLC</option>
+      <option value="IPTVSmartersPro">IPTV Smarters Pro</option>
+      <option value="TiviMate/4.7.0 (Android 11)">TiviMate</option>
+      <option value="OTT Navigator/1.6.9.4 (Linux;Android 11)">OTT Navigator</option>
+      <option value="Kodi/20.2 (Windows NT 10.0; Win64; x64) App_Bitness/64 Version/20.2">Kodi</option>
+      <option value="Mozilla/5.0 (QtEmbedded; U; Linux; C) AppleWebKit/533.3 (KHTML, like Gecko) MAG200 stbapp ver: 2 rev: 250 Safari/533.3">MAG (جهاز ستالكر)</option>
+      <option value="okhttp/4.9.0">okhttp (تطبيقات أندرويد)</option>
+      <option value="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36">Chrome</option>
+      <option value="__custom">مخصص...</option>
+    </select></div>
+    <div class="fld" id="uaCustomRow"><label>النص المخصص</label><input type="text" id="uaCustom" class="ltr" placeholder="MyPlayer/1.0"></div>
+    <label class="opt"><input type="checkbox" id="uaRecheck" checked> أعد الفحص بعد الحفظ</label>
+    <div class="row"><button id="uaSave">حفظ</button></div>
+  </div>
+</div></div>
 
 <div class="ov" id="chm"><div class="modal sm" style="max-width:640px">
   <div class="mhead"><b>📺 القنوات المطابقة</b><span class="small ltr" id="chmHost" style="flex:1;overflow:hidden;text-overflow:ellipsis"></span><button class="danger" id="chmClose">إغلاق ✕</button></div>
@@ -2765,7 +2798,7 @@ function cellHtml(c, r, i){
     case 'host': {
       const di = dupInfo[r.id];
       const dupBadge = di ? `<span class="dup" title="سيرفر مكرر بمستخدمين مختلفين (${di.count} مرات)">🔁${di.count}</span>${di.best?'<span class="best" title="الأطول صلاحية بين المكرر">⭐</span>':''}` : '';
-      const via = r.viaProxy ? `<span class="viap" title="يعمل عبر VPN فقط">🛡️ VPN</span>` : '';
+      const via = (r.viaProxy ? `<span class="viap" title="يعمل عبر VPN فقط">🛡️ VPN</span>` : '') + (r.ua ? `<span class="viap" title="هوية مخصصة: ${esc(r.ua)}">🪪</span>` : '');
       const t = r.type || 'xtream';
       const ts = `<select class="typesel" title="نوع السيرفر — غيّره ثم أعد الفحص">${TYPES.map(([v,l])=>`<option value="${v}" ${v===t?'selected':''}>${l}</option>`).join('')}</select>`;
       return `<td class="ltr hostcell">${ts}${via}${dupBadge}<input type="text" class="datain ltr" data-id="${r.id}" data-f="host" value="${esc(r.host)}" title="عنوان السيرفر — عدّله ثم أعد الفحص 🔁"></td>`;
@@ -2957,6 +2990,7 @@ function checkPayload(r, extra){
   else if(r.type==='m3u') p = {type:'m3u', url:r.m3uurl||r.host};
   else p = {host:r.host, username:r.username, password:r.password};
   if(proxyOf(r)) p.proxy = proxyOf(r);
+  if(r.ua) p.ua = r.ua;
   return Object.assign(p, extra||{});
 }
 function newRow(a){
@@ -3004,7 +3038,7 @@ async function checkOne(r, timeout, count, deep){
 async function deepOne(r, timeout){
   r.deepBusy = true; touch(r);
   try{
-    const d = await api('/api/deep', {host:r.host, username:r.username, password:r.password, timeout:timeout||15, proxy:proxyOf(r)});
+    const d = await api('/api/deep', {host:r.host, username:r.username, password:r.password, timeout:timeout||15, proxy:proxyOf(r), ua:r.ua||''});
     r.quality = d.quality; r.kbps = d.kbps; r.ttfb = d.ttfb_ms; r.deepMsg = d.message || ''; r.deepRes = d;
   }catch(e){ r.deepMsg = 'تعذر الفحص العميق'; }
   r.deepBusy = false;
@@ -3183,7 +3217,7 @@ $('#bkClear').onclick = () => { rows.forEach(r => r.sel=false); render(); };
 
 // ---------------- حفظ/استيراد المشروع ----------------
 const PROJ_FIELDS = ['host','username','password','type','portal','mac','isFull','m3uurl','rawM3u','m3uKind','title','userState','portalType','exportedId','autoRefresh','state','status','exp_ts','exp_date','days_left',
-  'unlimited','active_cons','max_cons','trial','created','channels','ping_ms','server_tz','message','m3u','viaProxy','proxyUsed','note','quality','kbps','deepMsg'];
+  'unlimited','active_cons','max_cons','trial','created','channels','ping_ms','server_tz','message','m3u','viaProxy','proxyUsed','note','quality','kbps','deepMsg','ua'];
 function exportProject(){
   if(!rows.length) return toast('لا توجد سيرفرات لحفظها');
   const payload = {app:'IPTV_Checker', format:1, exported_at:new Date().toISOString(), count:rows.length,
@@ -3435,12 +3469,14 @@ let pv = null, pvTimers = {};
 const sk = () => key(pv.r);
 const kindOf = it => (it && it.kind) || (pv.view==='episodes' ? 'series' : (pv.tab==='fav'||pv.tab==='recent') ? 'live' : pv.tab);
 const itemKey = it => it.ou || it.cmd || (kindOf(it)+':'+it.id);
-const tabKinds = () => (pv.type==='xtream') ? ['live','vod','series','fav','recent'] : ['live','fav','recent'];
+const tabKinds = () => (pv.type==='xtream') ? ['live','vod','series','fav','recent','all'] : ['live','fav','recent'];
+const jnorm = t => String(t||'').toLowerCase().replace(/[أإآ]/g,'ا').replace(/ة/g,'ه').replace(/ى/g,'ي').replace(/[^0-9a-z\u0621-\u064a]+/g,'');
+const isFolder = it => pv.view==='list' && (pv.tab==='series' || (pv.tab==='all' && it.kind==='series'));
 
 async function regSrv(r){
   const t = r.type||'xtream';
   const o = await api('/api/reg', {type:t, host: t==='stalker'?(r.portal||r.host): t==='m3u'?(r.m3uurl||r.host): r.host,
-    username:r.username||'', password:r.password||'', mac:r.mac||(t==='stalker'?r.username:''), proxy:proxyOf(r)});
+    username:r.username||'', password:r.password||'', mac:r.mac||(t==='stalker'?r.username:''), proxy:proxyOf(r), ua:r.ua||''});
   return o.s;
 }
 function surl(it, ext){
@@ -3501,12 +3537,12 @@ async function loadContent(force){
   const data = {live:{cats:{},items:[],loaded:true}, vod:{cats:{},items:[],loaded:false}, series:{cats:{},items:[],loaded:false}};
   let err = '';
   if(pv.type==='xtream'){
-    const res = await api('/api/content', {host:r.host, username:r.username, password:r.password, proxy:proxyOf(r)});
+    const res = await api('/api/content', {host:r.host, username:r.username, password:r.password, proxy:proxyOf(r), ua:r.ua||''});
     data.live = {cats:(res.live||{}).cats||{}, items:(res.live||{}).items||[], loaded:true};
     data.vod.cats = (res.vod||{}).cats||{}; data.series.cats = (res.series||{}).cats||{};
     err = res.error || '';
   } else if(pv.type==='stalker'){
-    const res = await api('/api/stalker', {portal:r.portal||r.host, mac:r.mac||r.username, proxy:proxyOf(r)});
+    const res = await api('/api/stalker', {portal:r.portal||r.host, mac:r.mac||r.username, proxy:proxyOf(r), ua:r.ua||''});
     data.live = {cats:res.cats||{}, items:res.items||[], loaded:true}; err = res.error || '';
   } else {
     const resp = await fetch(`/relay?t=${window.__TOKEN__}&s=${pv.sid}&u=${encodeURIComponent(r.m3uurl||r.host)}`);
@@ -3520,13 +3556,13 @@ async function ensureLoaded(k){
   if(!pv.data[k] || pv.data[k].loaded || pv.type!=='xtream') return;
   pvMsg(k==='vod' ? 'جاري تحميل الأفلام (مرة واحدة)...' : 'جاري تحميل المسلسلات (مرة واحدة)...');
   try{
-    const res = await api('/api/streams', {host:pv.r.host, username:pv.r.username, password:pv.r.password, kind:k, proxy:proxyOf(pv.r)});
+    const res = await api('/api/streams', {host:pv.r.host, username:pv.r.username, password:pv.r.password, kind:k, proxy:proxyOf(pv.r), ua:pv.r.ua||''});
     pv.data[k].items = res.items || []; pv.data[k].loaded = true;
     pvMsg(res.error ? ('تعذّر التحميل: '+res.error) : `${pv.data[k].items.length} عنصر — اختر واحداً.`);
   }catch(e){ pvMsg('تعذّر تحميل هذا القسم.'); }
 }
 function tabLabels(){
-  const base = {live:'📺 مباشر',vod:'🎬 أفلام',series:'📂 مسلسلات',fav:'⭐',recent:'🕘'};
+  const base = {live:'📺 مباشر',vod:'🎬 أفلام',series:'📂 مسلسلات',fav:'⭐',recent:'🕘',all:'🔎 الكل'};
   const kinds = tabKinds();
   [...$('#pvTabs').children].forEach(b => {
     const k = b.dataset.k; b.style.display = kinds.includes(k) ? '' : 'none';
@@ -3566,7 +3602,7 @@ function fillCats(keepName){
   const sel = $('#pvCat');
   const cats = (pv.data && pv.data[pv.tab] && pv.data[pv.tab].cats) || {};
   sel.innerHTML = '<option value="">كل التصنيفات</option>' + Object.entries(cats).map(([id,n])=>`<option value="${esc(id)}">${esc(n||id)}</option>`).join('');
-  sel.style.display = (pv.tab==='fav'||pv.tab==='recent'||pv.view==='episodes') ? 'none' : '';
+  sel.style.display = (pv.tab==='fav'||pv.tab==='recent'||pv.tab==='all'||pv.view==='episodes') ? 'none' : '';
   if(keepName){ const o = [...sel.options].find(o => o.textContent===keepName); if(o) sel.value = o.value; }
 }
 async function switchTab(k, keep){
@@ -3577,6 +3613,11 @@ async function switchTab(k, keep){
   fillCats(keep && keep.catName);
   buildList();
   if(k==='vod' || k==='series'){ await ensureLoaded(k); if(pv && pv.tab===k){ fillCats(keep && keep.catName); buildList(); tabLabels(); } }
+  if(k==='all'){
+    $('#pvQ').focus();
+    await ensureLoaded('vod'); if(pv && pv.tab==='all') await ensureLoaded('series');
+    if(pv && pv.tab==='all'){ buildList(); tabLabels(); pvMsg('اكتب اسم قناة أو فيلم أو مسلسل للبحث فيها كلها.'); }
+  }
 }
 function curItems(){
   if(pv.view==='episodes') return pv.episodes;
@@ -3587,10 +3628,26 @@ function curItems(){
 // ---- قائمة افتراضية (تُرسم الصفوف الظاهرة فقط) ----
 function buildList(){
   const q = $('#pvQ').value.trim().toLowerCase(), cat = $('#pvCat').value;
+  const qn = jnorm(q);
+  let out = [];
+  if(pv.tab==='all' && pv.view==='list'){                 // بحث شامل: مباشر + أفلام + مسلسلات
+    if(qn.length >= 2){
+      for(const [k, lbl] of [['live','📺 القنوات'],['vod','🎬 الأفلام'],['series','📂 المسلسلات']]){
+        const d = pv.data[k]; if(!d || !d.items) continue;
+        const hits = d.items.filter(c => jnorm(c.name).includes(qn));
+        if(!hits.length) continue;
+        out.push({h:true, text:`${lbl} (${hits.length})`});
+        hits.slice(0, 500).forEach(c => out.push({it:Object.assign({}, c, {kind:k})}));
+      }
+    }
+    pv.list = out;
+    $('#pvSp').style.height = (out.length*RH)+'px';
+    $('#pvEmpty').textContent = out.length ? '' : (qn.length < 2 ? 'اكتب حرفين على الأقل للبحث في كل المحتوى.' : 'لا يوجد شيء مطابق.');
+    drawVirtual(); return;
+  }
   let items = curItems();
   if(pv.view==='list' && (pv.tab==='live'||pv.tab==='vod'||pv.tab==='series') && cat) items = items.filter(c => String(c.cat)===cat);
-  if(q) items = items.filter(c => (c.name||'').toLowerCase().includes(q));
-  let out = [];
+  if(q) items = items.filter(c => (c.name||'').toLowerCase().includes(q) || (qn && jnorm(c.name).includes(qn)));
   if(pv.view==='episodes'){
     let last = null;
     for(const e of items){ if(e.season!==last){ last = e.season; out.push({h:true, text:'الموسم '+e.season}); } out.push({it:e}); }
@@ -3607,12 +3664,13 @@ function drawVirtual(){
   const box = $('#pvChs'), top = box.scrollTop, h = box.clientHeight || 320;
   const a = Math.max(0, Math.floor(top/RH)-8), b = Math.min(pv.list.length, Math.ceil((top+h)/RH)+8);
   let html = '';
-  const seriesList = pv.tab==='series' && pv.view==='list';
+  const KI = {live:'📺 ', vod:'🎬 ', series:'📂 '};
   for(let i=a;i<b;i++){
     const e = pv.list[i];
     if(e.h){ html += `<div class="ch hdr" style="top:${i*RH}px">${esc(e.text)}</div>`; continue; }
-    const it = e.it, sel = pv.cur && itemKey(pv.cur)===itemKey(it) && pv.view!=='list' || (pv.cur && pv.view==='list' && !seriesList && itemKey(pv.cur)===itemKey(it));
-    html += `<div class="ch ${sel?'sel':''}" style="top:${i*RH}px" data-i="${i}">${it.icon?`<img loading="lazy" src="${esc(it.icon)}" onerror="this.remove()" alt="">`:''}<span class="tx">${seriesList?'📂 ':''}${it.num&&pv.view==='episodes'?esc(it.num)+'. ':''}${esc(it.name)}</span>${isFav(it)?'<span class="rt">★</span>':''}${it.rating?`<span class="rt">${esc(it.rating)}</span>`:''}</div>`;
+    const it = e.it, folder = isFolder(it), sel = pv.cur && itemKey(pv.cur)===itemKey(it) && kindOf(pv.cur)===kindOf(it) && !folder;
+    const pre = pv.tab==='all' && pv.view==='list' ? (KI[it.kind]||'') : (folder ? '📂 ' : '');
+    html += `<div class="ch ${sel?'sel':''}" style="top:${i*RH}px" data-i="${i}">${it.icon?`<img loading="lazy" src="${esc(it.icon)}" onerror="this.remove()" alt="">`:''}<span class="tx">${pre}${it.num&&pv.view==='episodes'?esc(it.num)+'. ':''}${esc(it.name)}</span>${isFav(it)?'<span class="rt">★</span>':''}${it.rating?`<span class="rt">${esc(it.rating)}</span>`:''}</div>`;
   }
   $('#pvSp').innerHTML = html;
 }
@@ -3621,9 +3679,10 @@ $('#pvChs').addEventListener('scroll', () => { if(vdQ) return; vdQ = true; reque
 async function onItemClick(i){
   const e = pv.list[i]; if(!e || e.h) return;
   const it = e.it;
-  if(pv.tab==='series' && pv.view==='list'){
+  if(isFolder(it)){
+    pv.allQ = $('#pvQ').value;
     pv.curSeries = it; pvMsg('جاري جلب حلقات: '+it.name);
-    let res; try{ res = await api('/api/series', {host:pv.r.host, username:pv.r.username, password:pv.r.password, series_id:it.id, proxy:proxyOf(pv.r)}); }
+    let res; try{ res = await api('/api/series', {host:pv.r.host, username:pv.r.username, password:pv.r.password, series_id:it.id, proxy:proxyOf(pv.r), ua:pv.r.ua||''}); }
     catch(x){ pvMsg('تعذر جلب الحلقات.'); return; }
     if(!pv) return;
     pv.episodes = (res.episodes||[]).map(x => Object.assign({}, x, {kind:'series'})); pv.view = 'episodes';
@@ -3670,7 +3729,7 @@ async function loadExtra(it){
   try{
     if(k==='live'){
       showInfo({}, it.name);
-      const e = await api('/api/epg', {host:r.host, username:r.username, password:r.password, stream_id:it.id, proxy:proxyOf(r)});
+      const e = await api('/api/epg', {host:r.host, username:r.username, password:r.password, stream_id:it.id, proxy:proxyOf(r), ua:r.ua||''});
       if(!pv || pv.cur!==mine) return;
       const now = Date.now()/1000, items = (e.items||[]).filter(x => x.end>now).sort((a,b)=>a.start-b.start);
       const hm = t => new Date(t*1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
@@ -3678,7 +3737,7 @@ async function loadExtra(it){
       const html = (cur ? `<div class="small">▶ الآن: <b>${esc(cur.title)}</b> (${hm(cur.start)}–${hm(cur.end)})</div>` : '') + (nxt ? `<div class="small">⏭ التالي: ${esc(nxt.title)} (${hm(nxt.start)})</div>` : '');
       if(html) showInfo({}, it.name, html);
     } else if(k==='vod'){
-      const v = await api('/api/vodinfo', {host:r.host, username:r.username, password:r.password, vod_id:it.id, proxy:proxyOf(r)});
+      const v = await api('/api/vodinfo', {host:r.host, username:r.username, password:r.password, vod_id:it.id, proxy:proxyOf(r), ua:r.ua||''});
       if(!pv || pv.cur!==mine) return;
       showInfo(v.info, it.name);
     } else if(pv.curSeries && it.plot){ showInfo({cover:it.img, plot:it.plot, duration:it.dur}, it.name); }
@@ -3797,7 +3856,7 @@ function statsTick(){
 $('#pvSt').onclick = () => { const e = $('#pvStats'); e.classList.toggle('on'); clearInterval(statsTick.t); if(e.classList.contains('on')){ statsTick(); statsTick.t = setInterval(statsTick, 1000); } };
 
 $('#pvTabs').onclick = e => { const t = e.target.closest('.tab'); if(t && pv) switchTab(t.dataset.k); };
-$('#pvBack').onclick = () => { pv.view='list'; pv.curSeries=null; $('#pvBack').style.display='none'; fillCats(); $('#pvQ').value=''; $('#pvInfo').innerHTML=''; buildList(); pvMsg('اختر مسلسلاً.'); };
+$('#pvBack').onclick = () => { pv.view='list'; pv.curSeries=null; $('#pvBack').style.display='none'; fillCats(); $('#pvQ').value = pv.tab==='all' ? (pv.allQ||'') : ''; $('#pvInfo').innerHTML=''; buildList(); pvMsg(pv.tab==='all' ? 'نتائج البحث الشامل.' : 'اختر مسلسلاً.'); };
 $('#pvClose').onclick = pvClose;
 $('#ov').onclick = e => { if(e.target===$('#ov')) pvClose(); };
 $('#pvQ').oninput = () => { if(pv){ $('#pvChs').scrollTop = 0; buildList(); } };
@@ -3940,6 +3999,34 @@ $('#btnCompact').onclick = () => {
   $('#btnCompact').textContent = UI.compact ? '⬍ إظهار خانة الإدخال' : '⬍ تكبير الجدول';
   renderHead(); fitTable(); saveSoon();
 };
+
+
+// ---------------- هوية المشغّل (User-Agent) لكل سيرفر ----------------
+let uaRows = [];
+function uaName(ua){
+  if(!ua) return 'تلقائي';
+  const o = [...$('#uaSel').options].find(o => o.value===ua);
+  return o ? o.textContent : ua.slice(0, 24);
+}
+function openUa(list){
+  uaRows = list; if(!list.length) return;
+  const cur = list[0].ua || '';
+  const known = [...$('#uaSel').options].some(o => o.value===cur);
+  $('#uaSel').value = known ? cur : '__custom'; $('#uaCustom').value = known ? '' : cur;
+  $('#uaCustomRow').style.display = $('#uaSel').value==='__custom' ? '' : 'none';
+  $('#uamFor').textContent = list.length > 1 ? `(${list.length} سيرفرات محددة)` : (list[0].title || defaultName(list[0].host));
+  $('#uam').classList.add('on');
+}
+$('#uaSel').onchange = () => { $('#uaCustomRow').style.display = $('#uaSel').value==='__custom' ? '' : 'none'; if($('#uaSel').value==='__custom') $('#uaCustom').focus(); };
+$('#uamClose').onclick = () => closeOv('#uam');
+$('#uaSave').onclick = () => {
+  let ua = $('#uaSel').value; if(ua==='__custom') ua = $('#uaCustom').value.trim();
+  uaRows.forEach(r => { if(ua) r.ua = ua; else delete r.ua; delete r.chs; });
+  Object.keys(PVC).forEach(k => delete PVC[k]);
+  closeOv('#uam'); render(); toast('تم حفظ هوية المشغّل: ' + uaName(ua));
+  if($('#uaRecheck').checked) runChecks(uaRows.slice());
+};
+$('#bkUa').onclick = () => openUa(selected());
 
 // ---------------- أحداث الجدول ----------------
 $('#tb').onclick = async e => {
@@ -4116,12 +4203,13 @@ async function openDetails(r){
   const deep = r.deepRes ? `<h4>الفحص العميق: <span class="b ${(QL[r.quality]||[])[1]||''}">${(QL[r.quality]||['—'])[0]}</span> <span class="small">${esc(r.deepMsg||'')}</span></h4><table class="tbl2"><tr><th>القناة</th><th>نجح</th><th>TTFB</th><th>kbps</th><th>ملاحظة</th></tr>${(r.deepRes.samples||[]).map(s => `<tr><td>${esc(s.name||'')}</td><td>${s.ok?'✅':'❌'}</td><td>${s.ttfb!=null?s.ttfb+' ms':'—'}</td><td>${s.kbps ?? '—'}</td><td>${esc(s.why||'')}</td></tr>`).join('')}</table>` : '';
   $('#dtBody').innerHTML = `<div class="mgrid">${base}</div><div id="dtExtra" class="small">⏳ جاري جلب التفاصيل من السيرفر...</div>${deep}
     ${hist ? `<h4>سجل الفحوص</h4><table class="tbl2"><tr><th>الوقت</th><th>الحالة</th><th>الانتهاء</th><th>الاستجابة</th></tr>${hist}</table>` : ''}
-    <div class="row" style="margin-top:12px"><button id="dtDeep" class="sec">⚡ فحص بث فعلي الآن</button></div>`;
+    <div class="row" style="margin-top:12px"><button id="dtDeep" class="sec">⚡ فحص بث فعلي الآن</button><button id="dtUa" class="sec">🪪 هوية المشغّل: ${esc(uaName(r.ua))}</button></div>`;
+  $('#dtUa').onclick = () => openUa([r]);
   $('#dtDeep').disabled = t!=='xtream' || grp(r.state)!=='ok';
   $('#dtDeep').onclick = async () => { $('#dtDeep').disabled = true; await deepOne(r, 20); touch(r); openDetails(r); };
   if(t!=='xtream'){ $('#dtExtra').textContent = ''; return; }
   try{
-    const d = await api('/api/details', {host:r.host, username:r.username, password:r.password, proxy:proxyOf(r)});
+    const d = await api('/api/details', {host:r.host, username:r.username, password:r.password, proxy:proxyOf(r), ua:r.ua||''});
     if(!$('#dt').classList.contains('on')) return;
     const c = d.counts||{};
     $('#dtExtra').innerHTML = `<div class="mgrid">${cell('قنوات مباشرة', tnum(c.live))}${cell('أفلام', tnum(c.vod))}${cell('مسلسلات', tnum(c.series))}${cell('الدولة', esc(d.country||''))}${cell('IP', esc(d.ip||''))}${cell('HTTPS', d.https==null?'':(d.https?'متاح':'غير متاح'))}${cell('الصيغ', esc((d.formats||[]).join(', ')))}${cell('البروتوكول', esc(d.protocol||''))}</div>${d.error?`<div class="small">${esc(d.error)}</div>`:''}`;
@@ -4281,7 +4369,7 @@ document.addEventListener('keydown', e => {
     if(document.body.classList.contains('nfs')){ $('#pvFs').click(); return; }
     if($('#fmenu').classList.contains('on')) return closeFMenu();
     if($('#ov').classList.contains('on')) return pvClose();
-    for(const id of ['#dt','#ad','#st','#lg','#chm']) if($(id).classList.contains('on')){ closeOv(id); return; }
+    for(const id of ['#uam','#dt','#ad','#st','#lg','#chm']) if($(id).classList.contains('on')){ closeOv(id); return; }
     return;
   }
   if((e.ctrlKey||e.metaKey) && e.key==='Enter' && !running){ e.preventDefault(); $('#btnGo').click(); return; }
@@ -4358,6 +4446,7 @@ class Handler(BaseHTTPRequestHandler):
             if not self._tok_ok(q):
                 return self._send(403, 'forbidden', 'text/plain; charset=utf-8')
             srv = _REG.get(q.get('s') or '')
+            _TL.ua = (srv or {}).get('ua', '')
             if not srv:
                 return self._send(400, 'unknown server', 'text/plain; charset=utf-8')
             try:
@@ -4509,6 +4598,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, 'bad json', 'text/plain; charset=utf-8')
         if not isinstance(data, dict):
             data = {}
+        _TL.ua = str(data.get('ua') or '').strip()[:300]
         if path == '/api/bye':                          # النافذة أُغلقت
             _ALIVE['bye'] = time.time()
             return self._send(200, '{}', 'application/json; charset=utf-8')
