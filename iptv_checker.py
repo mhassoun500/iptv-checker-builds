@@ -32,7 +32,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-VERSION = "6.0.1"
+VERSION = "6.1"
 UA = "VLC/3.0.20 LibVLC/3.0.20"
 DEFAULT_TIMEOUT = 15
 
@@ -2077,6 +2077,8 @@ body.drag main{outline:3px dashed var(--acc);outline-offset:-8px;border-radius:1
 .row2 input{flex:1;min-width:0}
 .vwrap{position:relative;background:#000;border-radius:8px}
 .vwrap:fullscreen video{max-height:100vh;height:100vh;border-radius:0}
+body.nfs #pvWrap{position:fixed;inset:0;z-index:100;border-radius:0}
+body.nfs #pvVideo{width:100vw;height:100vh;max-height:100vh;border-radius:0}
 .pvstats{position:absolute;top:6px;right:6px;background:rgba(0,0,0,.68);color:#d1fae5;font:11px/1.5 Consolas,monospace;padding:6px 8px;border-radius:6px;display:none;direction:ltr;white-space:pre;pointer-events:none}
 .pvstats.on{display:block}
 .pvinfo{display:flex;gap:10px;align-items:flex-start;font-size:13px}
@@ -2763,7 +2765,18 @@ async function copyText(t){
   try { await navigator.clipboard.writeText(t); }
   catch(e){ const ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
 }
+const NATIVE = () => window.pywebview && window.pywebview.api;
 function downloadBlob(blob, name){
+  if(NATIVE()){                                   // نافذة مستقلة: نافذة حفظ أصلية
+    const fr = new FileReader();
+    fr.onload = async () => {
+      try{
+        const r = await window.pywebview.api.save_file(name, String(fr.result).split(',')[1] || '');
+        if(r && r.ok) toast('تم الحفظ: ' + r.path); else if(r && !r.cancel) toast('تعذّر الحفظ');
+      }catch(e){ toast('تعذّر الحفظ'); }
+    };
+    fr.readAsDataURL(blob); return;
+  }
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = name;
   a.click(); setTimeout(()=>URL.revokeObjectURL(a.href), 2000);
@@ -3466,7 +3479,16 @@ $('#pvCat').onchange = () => { if(pv){ $('#pvChs').scrollTop = 0; buildList(); }
 $('#pvChs').onclick = e => { const d = e.target.closest('.ch'); if(d && d.dataset.i!=null && pv) onItemClick(+d.dataset.i); };
 $('#pvFav').onclick = toggleFav;
 $('#pvTx').onclick = () => { if(!(pv && pv.cur)) return toast('اختر عنصراً أولاً'); pvStop(); pv.forceTx = !pv.forceTx; startAttempt(pv.cur); toast(pv.forceTx ? 'تحويل ffmpeg مفعّل' : 'تم إيقاف التحويل'); };
-$('#pvFs').onclick = () => { try{ document.fullscreenElement ? document.exitFullscreen() : $('#pvWrap').requestFullscreen(); }catch(e){} };
+$('#pvFs').onclick = () => {
+  const w = $('#pvWrap');
+  if(NATIVE() && !w.requestFullscreen){ document.body.classList.toggle('nfs'); window.pywebview.api.fullscreen(); return; }
+  try{ document.fullscreenElement ? document.exitFullscreen() : (w.requestFullscreen ? w.requestFullscreen() : $('#pvVideo').webkitEnterFullscreen()); }
+  catch(e){ if(NATIVE()){ document.body.classList.toggle('nfs'); window.pywebview.api.fullscreen(); } }
+};
+document.addEventListener('click', e => {
+  const a = e.target.closest && e.target.closest('a[target=_blank]');
+  if(a && NATIVE()){ e.preventDefault(); window.pywebview.api.open_url(a.href); }
+});
 $('#pvPip').onclick = async () => { try{ const v=$('#pvVideo'); document.pictureInPictureElement ? await document.exitPictureInPicture() : await v.requestPictureInPicture(); }catch(e){ toast('صورة داخل صورة غير متاحة الآن'); } };
 $('#pvVideo').addEventListener('volumechange', () => { if(pv){ UI.vol = $('#pvVideo').volume; saveSoon(); } });
 $('#pvRefresh').onclick = async () => {
@@ -3762,6 +3784,7 @@ setInterval(() => {
 document.addEventListener('keydown', e => {
   const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName||'');
   if(e.key==='Escape'){
+    if(document.body.classList.contains('nfs')){ $('#pvFs').click(); return; }
     if($('#fmenu').classList.contains('on')) return closeFMenu();
     if($('#ov').classList.contains('on')) return pvClose();
     for(const id of ['#dt','#ad','#st','#lg']) if($(id).classList.contains('on')){ closeOv(id); return; }
@@ -4196,6 +4219,10 @@ def main():
     # وضع المتصفح: افتح في المتصفح الافتراضي مباشرة (--browser)
     force_browser = '--browser' in sys.argv or '-b' in sys.argv
     # نافذة أصلية بوضع «التطبيق» من كروم/إيدج (محرك Chromium) — إغلاقها يُنهي البرنامج
+    # 1) نافذة مستقلة حقيقية (pywebview) — تُستخدم في نسخة ماك المبنية
+    if not force_browser and os.environ.get('MOIPTV_NO_WEBVIEW') != '1' and _open_webview(url):
+        return
+    # 2) نافذة كروم/إيدج بوضع التطبيق
     if not force_browser and _open_chrome_app(url):
         return
 
@@ -4274,6 +4301,62 @@ def _wait_for_ui(url, proc=None, first_wait=40, idle=150):
             return
         if now - seen > idle:
             return
+
+
+class _WebApi:
+    """دوال تستدعيها الواجهة داخل النافذة المستقلة (pywebview)."""
+    def __init__(self):
+        self.win = None
+
+    def save_file(self, name, b64):
+        import base64
+        try:
+            import webview
+            kind = getattr(getattr(webview, 'FileDialog', None), 'SAVE', None) or webview.SAVE_DIALOG
+            res = self.win.create_file_dialog(kind, save_filename=name)
+        except Exception as e:
+            return {'ok': False, 'error': str(e)[:200]}
+        if not res:
+            return {'ok': False, 'cancel': True}
+        path = res if isinstance(res, str) else res[0]
+        with open(path, 'wb') as f:
+            f.write(base64.b64decode(b64))
+        return {'ok': True, 'path': path}
+
+    def open_url(self, url):
+        if str(url).startswith(('http://', 'https://')):
+            webbrowser.open(url)
+        return True
+
+    def fullscreen(self):
+        try:
+            self.win.toggle_fullscreen()
+        except Exception:
+            pass
+        return True
+
+
+def _open_webview(url):
+    """نافذة تطبيق مستقلة حقيقية (أيقونة خاصة في شريط المهام/Dock) عبر pywebview إن كانت متوفرة.
+    على ماك تستخدم WKWebView المدمج في النظام؛ إغلاق النافذة يُنهي البرنامج."""
+    try:
+        import webview
+    except Exception:
+        return False
+    try:
+        api = _WebApi()
+        api.win = webview.create_window(f'Mo IPTV Checker {VERSION}', url, js_api=api,
+                                        width=1360, height=880, min_size=(900, 600),
+                                        background_color='#0f1419')
+        try:
+            webview.settings['OPEN_EXTERNAL_LINKS_IN_BROWSER'] = True
+        except Exception:
+            pass
+        webview.start(private_mode=False, storage_path=os.path.join(_DATA_DIR, 'webview'))
+        return True
+    except Exception as e:
+        log_event('error', f'webview: {e}')
+        return False
 
 
 def _open_chrome_app(url):

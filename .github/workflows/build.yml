@@ -128,11 +128,17 @@ jobs:
           cp app.png        icon.iconset/icon_512x512@2x.png
           iconutil -c icns icon.iconset -o app.icns
 
+      - name: Install pywebview (macOS standalone window)
+        if: matrix.label == 'macos'
+        run: |
+          python -m pip install "pywebview>=5,<6"
+          python -c "import webview, webview.platforms.cocoa; print('pywebview', webview.__version__ if hasattr(webview, '__version__') else 'ok')"
+
       - name: Build (macOS .app)
         if: matrix.label == 'macos'
         run: |
           pyinstaller --windowed --noconfirm --name "Mo IPTV Checker" --icon app.icns \
-            --osx-bundle-identifier com.mhassoun500.moiptvchecker iptv_checker.py
+            --osx-bundle-identifier com.mhassoun500.moiptvchecker --collect-submodules webview iptv_checker.py
           V=$(python -c "import re;print(re.search(r'VERSION\\s*=\\s*\"([^\"]+)\"',open('iptv_checker.py',encoding='utf-8').read()).group(1))")
           P="dist/Mo IPTV Checker.app/Contents/Info.plist"
           /usr/libexec/PlistBuddy -c "Delete :CFBundleDisplayName" "$P" 2>/dev/null || true
@@ -140,6 +146,18 @@ jobs:
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $V" "$P" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $V" "$P"
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $V" "$P" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $V" "$P"
           codesign --force --deep --sign - "dist/Mo IPTV Checker.app" 
+
+      - name: Smoke test app bundle (macOS)
+        if: matrix.label == 'macos'
+        continue-on-error: true
+        run: |
+          "dist/Mo IPTV Checker.app/Contents/MacOS/Mo IPTV Checker" > smoke.log 2>&1 &
+          PID=$!
+          sleep 12
+          curl -s -o /dev/null -w "server HTTP %{http_code}\n" http://127.0.0.1:8765/ || echo "server not reachable"
+          ps -p $PID >/dev/null && echo "app still running (window open)" || echo "app exited"
+          kill $PID 2>/dev/null || true
+          cat smoke.log | tail -20
 
       - name: Build .dmg (macOS)
         if: matrix.label == 'macos'
