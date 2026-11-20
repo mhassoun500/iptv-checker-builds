@@ -246,3 +246,31 @@ class TestSessionSettingsLog(Base):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestChannelSearch(Base):
+    def test_norm(self):
+        self.assertEqual(ic._norm('beIN-Sports 1 HD'), 'beinsports1hd')
+        self.assertIn(ic._norm('بي ان'), ic._norm('بي إن سبورت'))
+
+    def test_search_all_types(self):
+        r = self.post('/api/chsearch', dict(host=self.murl, username='u1', password='p1', terms='sport', verify=True))
+        self.assertEqual(r['count'], 1)
+        self.assertTrue(r['verified']['ok'])
+        r = self.post('/api/chsearch', dict(type='m3u', url=self.murl + '/list.m3u', terms=['news']))
+        self.assertEqual(r['count'], 1)
+        r = self.post('/api/chsearch', dict(type='stalker', portal=self.murl + '/portal.php', mac=mk.MAC, terms=['one'], verify=True))
+        self.assertEqual(r['count'], 1)
+        self.assertTrue(r['verified']['ok'])
+        r = self.post('/api/chsearch', dict(host=self.murl, username='u1', password='p1', terms=['zzzz']))
+        self.assertEqual(r['count'], 0)
+
+
+class TestUpdate(Base):
+    def test_target_and_hash(self):
+        mode, name = ic._update_target({'iptv_checker.py': 'x', 'SHA256SUMS.txt': 'y', 'a_Setup.exe': 'z'})
+        self.assertEqual((mode, name), ('source', 'iptv_checker.py'))
+        p = os.path.join(tempfile.mkdtemp(), 'f')
+        with open(p, 'wb') as f:
+            f.write(b'abc')
+        self.assertEqual(ic._sha256(p), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad')

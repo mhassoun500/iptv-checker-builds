@@ -32,7 +32,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-VERSION = "6.1"
+VERSION = "6.2"
 UA = "VLC/3.0.20 LibVLC/3.0.20"
 DEFAULT_TIMEOUT = 15
 
@@ -1679,6 +1679,119 @@ def _st_token(portal, mac, proxy='', timeout=15, force=False):
     _ST_TOK[k] = (tok, time.time())
     return tok
 
+# ---------------- البحث داخل قنوات السيرفرات ----------------
+_CH_CACHE = {}           # مفتاح السيرفر -> (الوقت، القائمة)
+_CH_LOCK = threading.Lock()
+_CH_TTL = 30 * 60
+
+
+def _norm(s):
+    """توحيد النص للبحث: حروف صغيرة، بدون مسافات ورموز، وتوحيد الألف والتاء المربوطة والياء."""
+    s = str(s or '').lower()
+    s = s.translate(str.maketrans({'أ': 'ا', 'إ': 'ا', 'آ': 'ا', 'ة': 'ه', 'ى': 'ي', 'ؤ': 'و', 'ئ': 'ي'}))
+    return re.sub(r'[^0-9a-zء-ي]+', '', s)
+
+
+def _parse_m3u_text(text):
+    items, cur = [], None
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith('#EXTINF'):
+            g = re.search(r'group-title="([^"]*)"', line, re.I)
+            nm = line.rsplit(',', 1)[1].strip() if ',' in line else ''
+            cur = {'name': nm, 'cat': g.group(1) if g else ''}
+        elif not line.startswith('#'):
+            it = dict(cur or {'name': '', 'cat': ''})
+            it['ou'] = line
+            it['id'] = len(items) + 1
+            items.append(it)
+            cur = None
+    return items
+
+
+def _channel_list(d, timeout=25, force=False):
+    """قائمة القنوات المباشرة لسيرفر (مع أسماء التصنيفات)، مخزّنة مؤقتاً 30 دقيقة."""
+    typ = d.get('type') or 'xtream'
+    key = hist_key(typ, d)
+    now = time.time()
+    with _CH_LOCK:
+        c = _CH_CACHE.get(key)
+    if c and not force and now - c[0] < _CH_TTL:
+        return c[1]
+    proxy = str(d.get('proxy') or '')
+    op = _opener_for(proxy)
+    if typ == 'stalker':
+        res = stalker_channels(d.get('portal') or d.get('host'), d.get('mac') or d.get('username'), proxy, timeout)
+        cats = res.get('cats') or {}
+        items = [{'name': x.get('name', ''), 'cat': cats.get(str(x.get('cat')), ''), 'cmd': x.get('cmd', ''),
+                  'id': x.get('id')} for x in res.get('items') or []]
+        if not items and res.get('error'):
+            raise RuntimeError(res['error'])
+    elif typ == 'm3u':
+        items = _parse_m3u_text(_fetch_text(d.get('url') or d.get('host'), op, timeout, 60_000_000))
+    else:
+        host = str(d.get('host') or '').rstrip('/')
+        qs = urllib.parse.urlencode({'username': d.get('username', ''), 'password': d.get('password', '')})
+        cats = _cats(host, qs, 'get_live_categories', timeout, op)
+        st = get_streams(host, d.get('username', ''), d.get('password', ''), 'live', max(timeout, 30), op)
+        if st.get('error') and not st.get('items'):
+            raise RuntimeError(st['error'])
+        items = [dict(x, cat=cats.get(str(x.get('cat')), '')) for x in st.get('items') or []]
+    with _CH_LOCK:
+        _CH_CACHE[key] = (now, items)
+    return items
+
+
+def channel_search(d, terms, verify=False, timeout=25, force=False):
+    terms = [t for t in (_norm(x) for x in terms) if len(t) >= 2]
+    out = {'count': 0, 'total': 0, 'matches': [], 'verified': None, 'error': ''}
+    if not terms:
+        out['error'] = 'اكتب كلمة بحث من حرفين على الأقل'
+        return out
+    try:
+        items = _channel_list(d, timeout, force)
+    except Exception as e:
+        out['error'] = 'تعذّر جلب القنوات: ' + (str(e) if isinstance(e, RuntimeError) else _net_reason(e))[:150]
+        return out
+    out['total'] = len(items)
+    hits = []
+    for it in items:
+        n, c = _norm(it.get('name')), _norm(it.get('cat'))
+        if any(t in n or t in c for t in terms):
+            hits.append(it)
+    out['count'] = len(hits)
+    out['matches'] = [{k: v for k, v in h.items() if k in ('name', 'cat', 'id', 'ext', 'cmd', 'ou', 'icon')}
+                      for h in hits[:300]]
+    if verify and hits:
+        typ = d.get('type') or 'xtream'
+        proxy = str(d.get('proxy') or '')
+        op = _opener_for(proxy)
+        tried = 0
+        for h in hits[:3]:                              # حتى 3 قنوات، واحدة في كل مرة
+            tried += 1
+            try:
+                if typ == 'stalker':
+                    url = stalker_link(d.get('portal') or d.get('host'), d.get('mac') or d.get('username'),
+                                       h.get('cmd', ''), proxy, 15)
+                elif typ == 'm3u':
+                    url = h.get('ou')
+                else:
+                    url = _direct_url(str(d.get('host')).rstrip('/'), d.get('username', ''), d.get('password', ''),
+                                      h.get('id'), 'ts', 'live')
+                r = _probe_sample(url, op, 15)
+            except Exception as e:
+                r = {'ok': False, 'why': str(e)[:120]}
+            r['name'] = str(h.get('name') or '')[:60]
+            out['verified'] = r
+            if r.get('ok'):
+                break
+            time.sleep(0.4)
+        out['verified']['tried'] = tried
+    return out
+
+
 
 def stalker_channels(portal, mac, proxy='', timeout=20):
     out = {'cats': {}, 'items': [], 'error': ''}
@@ -1859,17 +1972,165 @@ def _vtuple(v):
     return tuple(int(x) for x in re.findall(r'\d+', str(v))[:4])
 
 
+_REPO = 'mhassoun500/iptv-checker-builds'
+_UPD = {'stage': 'idle', 'pct': 0, 'msg': '', 'error': ''}
+_UPD_INFO = {}
+
+
 def update_check():
     try:
-        txt = _fetch_text('https://api.github.com/repos/mhassoun500/iptv-checker-builds/releases/latest',
-                          _build_opener(''), timeout=6, limit=200_000)
+        txt = _fetch_text(f'https://api.github.com/repos/{_REPO}/releases/latest',
+                          _build_opener(''), timeout=6, limit=400_000)
         j = json.loads(txt)
         tag = str(j.get('tag_name') or '')
         if tag and _vtuple(tag) > _vtuple(VERSION):
-            return {'newer': True, 'version': tag.lstrip('v'), 'url': j.get('html_url') or ''}
+            assets = {a.get('name'): a.get('browser_download_url') for a in j.get('assets') or [] if a.get('name')}
+            _UPD_INFO.clear()
+            _UPD_INFO.update(tag=tag, assets=assets)
+            kind, _ = _update_target(assets)
+            return {'newer': True, 'version': tag.lstrip('v'), 'url': j.get('html_url') or '',
+                    'auto': bool(kind and 'SHA256SUMS.txt' in assets), 'notes': str(j.get('body') or '')[:1500]}
     except Exception:
         pass
     return {'newer': False}
+
+
+def _app_paths():
+    """(نوع التشغيل، المسار الحالي): source / win-setup / win-portable / mac / linux."""
+    if not getattr(sys, 'frozen', False):
+        return 'source', os.path.abspath(__file__)
+    exe = os.path.abspath(sys.executable)
+    if sys.platform == 'darwin':
+        i = exe.find('.app/')
+        return 'mac', (exe[:i + 4] if i > 0 else exe)
+    if sys.platform.startswith('win'):
+        d = os.path.dirname(exe)
+        inst = any(n.lower().startswith('unins') and n.lower().endswith('.exe') for n in os.listdir(d))
+        return ('win-setup' if inst else 'win-portable'), exe
+    return 'linux', exe
+
+
+def _update_target(assets):
+    mode, _ = _app_paths()
+    want = {'source': lambda n: n == 'iptv_checker.py', 'win-setup': lambda n: n.endswith('Setup.exe'),
+            'win-portable': lambda n: n.endswith('-windows.exe'), 'mac': lambda n: n.endswith('.dmg'),
+            'linux': lambda n: n.endswith('-linux')}[mode]
+    for n in assets:
+        if want(n):
+            return mode, n
+    return None, None
+
+
+def _sha256(path):
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for b in iter(lambda: f.read(1 << 20), b''):
+            h.update(b)
+    return h.hexdigest()
+
+
+def _download(url, dest, progress=None):
+    op = _build_opener('')
+    req = urllib.request.Request(url, headers={'User-Agent': UA})
+    with op.open(req, timeout=60) as r, open(dest, 'wb') as f:
+        total = int(r.headers.get('Content-Length') or 0)
+        got = 0
+        while True:
+            b = r.read(1 << 16)
+            if not b:
+                break
+            f.write(b)
+            got += len(b)
+            if progress and total:
+                progress(got * 100 // total)
+    return dest
+
+
+def _update_worker():
+    import subprocess
+    try:
+        assets = _UPD_INFO.get('assets') or {}
+        mode, name = _update_target(assets)
+        if not name:
+            raise RuntimeError('لا يوجد ملف تحديث مناسب لهذا الجهاز في الإصدار الجديد')
+        if 'SHA256SUMS.txt' not in assets:
+            raise RuntimeError('ملف البصمة SHA256SUMS.txt غير موجود في الإصدار — لن يُثبَّت التحديث')
+        d = os.path.join(_DATA_DIR, 'update')
+        os.makedirs(d, exist_ok=True)
+        _UPD.update(stage='download', pct=0, msg='جاري تنزيل التحديث...')
+        sums = _fetch_text(assets['SHA256SUMS.txt'], _build_opener(''), timeout=20, limit=200_000)
+        expect = ''
+        for line in sums.splitlines():
+            parts = line.strip().split()
+            if len(parts) >= 2 and parts[-1].lstrip('*') == name:
+                expect = parts[0].lower()
+        if not expect:
+            raise RuntimeError('لا توجد بصمة لهذا الملف في SHA256SUMS.txt — لن يُثبَّت التحديث')
+        dest = os.path.join(d, name)
+        _download(assets[name], dest, lambda p: _UPD.update(pct=p))
+        _UPD.update(stage='verify', pct=100, msg='جاري التحقق من البصمة...')
+        got = _sha256(dest)
+        if got != expect:
+            os.remove(dest)
+            raise RuntimeError('البصمة لا تطابق — الملف تالف أو معدّل، تم إلغاء التحديث')
+        log_event('update', f'{name} sha256 OK')
+        _UPD.update(stage='install', msg='جاري التثبيت وإعادة التشغيل...')
+        _, cur = _app_paths()
+        pid = os.getpid()
+        if mode == 'win-setup':                         # انتظر إغلاق البرنامج ثم شغّل المثبّت بصمت (يعيد فتحه بعد التثبيت)
+            bat = os.path.join(d, 'apply_update.bat')
+            with open(bat, 'w', encoding='utf-8') as f:
+                f.write('@echo off\r\n:w\r\ntasklist /FI "PID eq %d" | find "%d" >nul && (timeout /t 1 >nul & goto w)\r\n'
+                        '"%s" /SILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS\r\ndel "%%~f0"\r\n' % (pid, pid, dest))
+            subprocess.Popen(['cmd', '/c', bat], creationflags=0x08000000, close_fds=True)
+        elif mode == 'win-portable':
+            bat = os.path.join(d, 'apply_update.bat')
+            with open(bat, 'w', encoding='utf-8') as f:
+                f.write('@echo off\r\n:w\r\ntasklist /FI "PID eq %d" | find "%d" >nul && (timeout /t 1 >nul & goto w)\r\n'
+                        'move /Y "%s" "%s" >nul\r\nstart "" "%s"\r\ndel "%%~f0"\r\n' % (pid, pid, dest, cur, cur))
+            subprocess.Popen(['cmd', '/c', bat], creationflags=0x08000000, close_fds=True)
+        elif mode == 'mac':
+            sh = os.path.join(d, 'apply_update.sh')
+            mnt = os.path.join(d, 'mnt')
+            with open(sh, 'w') as f:
+                f.write(f'''#!/bin/bash
+while kill -0 {pid} 2>/dev/null; do sleep 0.5; done
+mkdir -p "{mnt}"
+hdiutil attach -nobrowse -quiet -mountpoint "{mnt}" "{dest}" || exit 1
+APP=$(ls -d "{mnt}"/*.app | head -1)
+rm -rf "{cur}.old"; mv "{cur}" "{cur}.old" && cp -R "$APP" "{cur}" && rm -rf "{cur}.old" || mv "{cur}.old" "{cur}"
+hdiutil detach -quiet "{mnt}"
+xattr -cr "{cur}" 2>/dev/null
+open "{cur}"
+''')
+            os.chmod(sh, 0o755)
+            subprocess.Popen(['/bin/bash', sh], start_new_session=True, close_fds=True)
+        else:                                            # linux / source
+            sh = os.path.join(d, 'apply_update.sh')
+            run = f'"{sys.executable}" "{cur}"' if mode == 'source' else f'"{cur}"'
+            with open(sh, 'w') as f:
+                f.write(f'#!/bin/sh\nwhile kill -0 {pid} 2>/dev/null; do sleep 0.5; done\n'
+                        f'cp "{dest}" "{cur}" && chmod +x "{cur}"\nnohup {run} >/dev/null 2>&1 &\n')
+            os.chmod(sh, 0o755)
+            subprocess.Popen(['/bin/sh', sh], start_new_session=True, close_fds=True)
+        _UPD.update(stage='restart', msg='سيُعاد فتح البرنامج بالإصدار الجديد...')
+        threading.Timer(2.0, lambda: os._exit(0)).start()
+    except Exception as e:
+        log_event('error', f'update: {e}')
+        _UPD.update(stage='error', error=str(e)[:200], msg='')
+
+
+def update_apply():
+    if _UPD['stage'] in ('download', 'verify', 'install', 'restart'):
+        return dict(_UPD)
+    if not _UPD_INFO.get('assets'):
+        update_check()
+    if not _UPD_INFO.get('assets'):
+        return {'stage': 'error', 'error': 'لا يوجد تحديث متاح'}
+    _UPD.update(stage='download', pct=0, msg='بدء التحديث...', error='')
+    threading.Thread(target=_update_worker, daemon=True).start()
+    return dict(_UPD)
 
 
 # ---------------- مكتبات المشغّل محلياً ----------------
@@ -2019,6 +2280,16 @@ th{color:var(--mute);font-weight:600;position:sticky;top:0;background:var(--card
 tr:hover td{background:#1c2530}
 tr.dragging{opacity:.4}
 tr.bestrow td{background:#132617}
+tr.chrow td{background:#2b2108}
+tr.chrow td:first-child{box-shadow:inset -4px 0 0 #f59e0b}
+#chbox{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#1a1606;border:1px solid #5b4a12;border-radius:10px;padding:8px 12px;margin-bottom:12px}
+#chbox input[type=search]{flex:1 1 260px;min-width:0}
+.chchip{background:#2b2108;border:1px solid #5b4a12;color:#fcd34d;border-radius:14px;padding:2px 10px;font-size:12px;cursor:pointer}
+.chchip i{font-style:normal;margin-inline-start:6px;color:var(--mute)}
+.chbtn{background:#4a3208;color:#fcd34d;border:1px solid #92400e;border-radius:6px;padding:2px 8px;font-size:12px;cursor:pointer}
+.chlist2 .it{display:flex;gap:8px;align-items:center;padding:5px 4px;border-bottom:1px solid var(--line)}
+.chlist2 .it span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chlist2 .it em{color:var(--mute);font-style:normal;font-size:11px}
 .dup{display:inline-block;background:#3b2a12;color:#fcd34d;border-radius:6px;padding:0 5px;font-size:11px;margin-inline-start:4px;direction:ltr}
 .best{margin-inline-start:3px}
 .viap{display:inline-block;background:#0d3b2e;color:#6ee7b7;border:1px solid #10b981;border-radius:6px;padding:0 5px;font-size:11px;margin-inline-start:4px}
@@ -2205,6 +2476,14 @@ http://example.com:8080/live/USER/PASS/12345.ts"></textarea>
 <div class="stats" id="stats"></div>
 
 <div class="card" style="margin-top:16px">
+  <div id="chbox">
+    <b>📺 بحث في قنوات السيرفرات</b>
+    <input type="search" id="chq" placeholder="مثال: bein, بي ان سبورت, ssc — افصل بين الكلمات بفاصلة">
+    <label class="opt" title="يجرّب تشغيل قناة مطابقة فعلياً للتأكد أنها تبث"><input type="checkbox" id="chVerify"> تأكد من البث</label>
+    <button id="btnChSearch">🔎 ابحث في القنوات</button>
+    <button class="sec" id="btnChClear" title="إزالة نتائج البحث في القنوات">✕ مسح</button>
+    <span id="chSaved" style="display:flex;gap:6px;flex-wrap:wrap"></span>
+  </div>
   <div class="row" style="margin-top:0;margin-bottom:12px">
     <label class="opt">الترتيب
       <select id="sort">
@@ -2214,6 +2493,7 @@ http://example.com:8080/live/USER/PASS/12345.ts"></textarea>
         <option value="state">حسب الحالة</option>
         <option value="ping">الأسرع استجابة</option>
         <option value="score">الأعلى تقييماً</option>
+        <option value="chs">الأكثر قنوات مطابقة</option>
       </select>
     </label>
     <input type="search" id="q" placeholder="بحث في السيرفر أو المستخدم..." style="flex:1 1 160px;min-width:0">
@@ -2298,6 +2578,11 @@ http://example.com:8080/live/USER/PASS/12345.ts"></textarea>
 
 <div class="menu" id="fmenu"></div>
 
+<div class="ov" id="chm"><div class="modal sm" style="max-width:640px">
+  <div class="mhead"><b>📺 القنوات المطابقة</b><span class="small ltr" id="chmHost" style="flex:1;overflow:hidden;text-overflow:ellipsis"></span><button class="danger" id="chmClose">إغلاق ✕</button></div>
+  <div class="mpad"><div class="small" id="chmInfo"></div><input type="search" id="chmQ" placeholder="تصفية..." style="width:100%;margin:8px 0"><div class="chlist2" id="chmList"></div></div>
+</div></div>
+
 <div class="ov" id="dt"><div class="modal sm" style="max-width:760px">
   <div class="mhead"><b>🔍 تفاصيل السيرفر</b><span class="small ltr" id="dtHost" style="flex:1;overflow:hidden;text-overflow:ellipsis"></span><button class="danger" id="dtClose">إغلاق ✕</button></div>
   <div class="mpad" id="dtBody"></div>
@@ -2336,6 +2621,7 @@ http://example.com:8080/live/USER/PASS/12345.ts"></textarea>
     <div class="fld"><label>مسار ffmpeg (اختياري — يُكتشف تلقائياً)</label><input type="text" id="sFfmpeg" class="ltr" placeholder="/opt/homebrew/bin/ffmpeg"></div>
     <div class="hint" id="sCaps"></div>
     <div class="hint ltr" id="sDir" style="margin-top:6px"></div>
+    <div class="row"><button class="sec" id="sUpdNow">🔄 التحقق من التحديثات الآن</button></div>
     <div class="row"><button id="sSave">حفظ</button></div>
   </div>
 </div></div>
@@ -2354,19 +2640,20 @@ const ST = {
   expired:['منتهي ⌛','s-expired'], invalid:['بيانات خاطئة','s-invalid'],
   blocked:['محظور / معطّل','s-invalid'], offline:['لا يستجيب ❌','s-offline'], error:['خطأ','s-offline']
 };
-const FILTERS = [['all','الإجمالي'],['ok','يعمل'],['expired','منتهي'],['bad','بيانات خاطئة / محظور'],['offline','لا يستجيب / خطأ'],['pending','لم يُفحص'],['viaproxy','تعمل عبر VPN'],['soon7','ينتهي ≤ 7 أيام'],['soon30','ينتهي ≤ 30 يوماً']];
+const FILTERS = [['all','الإجمالي'],['ok','يعمل'],['expired','منتهي'],['bad','بيانات خاطئة / محظور'],['offline','لا يستجيب / خطأ'],['pending','لم يُفحص'],['viaproxy','تعمل عبر VPN'],['soon7','ينتهي ≤ 7 أيام'],['soon30','ينتهي ≤ 30 يوماً'],['chmatch','📺 يحتوي القنوات المطلوبة']];
 const ORDER = {active:0,active_m3u:1,expired:2,blocked:3,invalid:4,offline:5,error:6,checking:7,pending:8};
 let rows = [], seq = 0, stop = false, running = false, filter = 'all', renderQueued = false;
 let SET = {per_domain:2, ffmpeg_path:'', ext_player:'auto', ext_player_path:'', ext_direct:false, updates:true, auto_hours:0, deep_default:false, count_default:false, timeout:15, conc:8};
 let CAPS = {};
-let UI = {hidden:['conn','msg'], vol:1, favs:{}, recents:{}, resume:{}, lastAuto:0};
+let UI = {hidden:['conn','msg'], vol:1, favs:{}, recents:{}, resume:{}, lastAuto:0, chTerms:[], chq:''};
 const COLS = [
   ['sel','☑',34,false],['n','#',54,false],['st','الحالة',118,false],['host','السيرفر',250,false],['user','المستخدم',130,true],['pass','كلمة المرور',130,true],
   ['exp','الانتهاء',104,true],['days','الأيام',92,true],['conn','الاتصالات',84,true],['ping','الاستجابة',82,true],['q','الجودة',92,true],['score','التقييم',66,true],
-  ['note','وسوم / ملاحظة',140,true],['msg','ملاحظات الفحص',170,true],['name','الاسم في iptvnator',150,true],['acts','',196,false]
+  ['chs','القنوات المطابقة',118,true],['note','وسوم / ملاحظة',140,true],['msg','ملاحظات الفحص',170,true],['name','الاسم في iptvnator',150,true],['acts','',196,false]
 ];
-const COLNAME = {user:'المستخدم',pass:'كلمة المرور',exp:'تاريخ الانتهاء',days:'الأيام المتبقية',conn:'الاتصالات',ping:'الاستجابة',q:'جودة البث',score:'التقييم',note:'وسوم / ملاحظة',msg:'ملاحظات الفحص',name:'الاسم في iptvnator'};
-const shownCols = () => COLS.filter(c => !(c[3] && UI.hidden.includes(c[0])));
+const COLNAME = {chs:'القنوات المطابقة',user:'المستخدم',pass:'كلمة المرور',exp:'تاريخ الانتهاء',days:'الأيام المتبقية',conn:'الاتصالات',ping:'الاستجابة',q:'جودة البث',score:'التقييم',note:'وسوم / ملاحظة',msg:'ملاحظات الفحص',name:'الاسم في iptvnator'};
+const hasCh = () => rows.some(r => r.chs);
+const shownCols = () => COLS.filter(c => !(c[3] && UI.hidden.includes(c[0])) && !(c[0]==='chs' && !hasCh()));
 
 const grp = s => (s==='active'||s==='active_m3u')?'ok':s==='expired'?'expired':(s==='invalid'||s==='blocked')?'bad':(s==='offline'||s==='error')?'offline':'pending';
 function defaultName(host){
@@ -2473,6 +2760,14 @@ function cellHtml(c, r, i){
       return `<td><span class="b ${q[1]}" title="${esc(r.deepMsg||'')}">${q[0]}</span>${r.kbps?`<div class="small ltr">${r.kbps} kbps</div>`:''}</td>`;
     }
     case 'score': { const s = scoreOf(r); return `<td class="score" style="color:${s==null?'var(--mute)':s>=75?'var(--ok)':s>=50?'var(--warn)':'var(--bad)'}">${s==null?'—':s}</td>`; }
+    case 'chs': {
+      const x = r.chs; if(!x) return '<td class="small">—</td>';
+      if(x.busy) return '<td class="small">⏳ جاري البحث</td>';
+      if(x.error) return `<td class="small" title="${esc(x.error)}" style="color:var(--off)">تعذّر</td>`;
+      if(!x.count) return `<td class="small" title="من أصل ${x.total} قناة">لا يوجد</td>`;
+      const v = x.verified, vb = !v ? '' : v.ok ? ' <span title="تم التأكد أن «'+esc(v.name)+'» تبث">✅</span>' : ' <span title="'+esc((v.name||'')+': '+(v.why||'لا تبث'))+'">⚠️</span>';
+      return `<td><button class="chbtn" data-act="chs" title="${esc((x.matches||[]).slice(0,8).map(m=>m.name).join('، '))}">📺 ${x.count}</button>${vb}</td>`;
+    }
     case 'note': return `<td><input type="text" class="notein" data-id="${r.id}" value="${esc(r.note||'')}" placeholder="#وسم أو ملاحظة"></td>`;
     case 'msg': return `<td class="small note" title="${esc(r.message||'')}${r.scheme_note?' — '+esc(r.scheme_note):''}">${esc(r.message||'')}</td>`;
     case 'name': return `<td><input type="text" class="namein ltr" data-id="${r.id}" value="${esc(r.title || defaultName(r.host))}" placeholder="${esc(defaultName(r.host))}" title="اسم السيرفر عند التصدير إلى iptvnator"></td>`;
@@ -2483,7 +2778,7 @@ function cellHtml(c, r, i){
 function rowHtml(r, i){
   const di = dupInfo[r.id];
   const cols = shownCols();
-  return `<tr data-id="${r.id}" draggable="true" class="${di&&di.best?'bestrow':''} ${r.viaProxy?'viarow':''}">${cols.map(c => cellHtml(c[0], r, i)).join('')}</tr>`;
+  return `<tr data-id="${r.id}" draggable="true" class="${di&&di.best?'bestrow':''} ${r.viaProxy?'viarow':''} ${r.chs&&r.chs.count>0?'chrow':''}">${cols.map(c => cellHtml(c[0], r, i)).join('')}</tr>`;
 }
 function renderHead(){
   const cols = shownCols();
@@ -2508,6 +2803,7 @@ const FCOL = {
   q: r => (QL[r.quality]||['—'])[0],
   score: r => { const v = scoreOf(r); return v==null ? '—' : v>=75 ? '75–100' : v>=50 ? '50–74' : 'أقل من 50'; },
   note: r => (r.note||'').trim() || '— بدون',
+  chs: r => !r.chs ? '—' : r.chs.error ? 'تعذّر' : r.chs.count>0 ? (r.chs.verified && r.chs.verified.ok ? 'يحتوي ✅ يبث' : 'يحتوي') : 'لا يحتوي',
   name: r => (r.title || defaultName(r.host)) || '—',
 };
 const passCol = (r, skip) => { const cf = UI.colf || {}; for(const c in cf){ if(c===skip || !FCOL[c]) continue; if(!cf[c].includes(FCOL[c](r))) return false; } return true; };
@@ -2555,6 +2851,7 @@ function baseList(){
   const fm = r => {
     if(filter==='all') return true;
     if(filter==='viaproxy') return !!r.viaProxy;
+    if(filter==='chmatch') return !!(r.chs && r.chs.count>0);
     if(filter==='soon7' || filter==='soon30'){ const n = filter==='soon7' ? 7 : 30; return grp(r.state)==='ok' && !r.unlimited && r.days_left!=null && r.days_left>=0 && r.days_left<=n; }
     return grp(r.state)===filter;
   };
@@ -2568,15 +2865,16 @@ function sortList(list){
   else if(s==='state') list.sort((a,b)=>(ORDER[a.state]??9)-(ORDER[b.state]??9));
   else if(s==='ping') list.sort((a,b)=>(a.ping_ms??1e9)-(b.ping_ms??1e9));
   else if(s==='score') list.sort((a,b)=>(scoreOf(b)??-1)-(scoreOf(a)??-1));
+  else if(s==='chs') list.sort((a,b)=>((b.chs&&b.chs.count)||0)-((a.chs&&a.chs.count)||0));
   return list;
 }
 const selected = () => rows.filter(r => r.sel);
 function renderStats(){
-  const c = {all:rows.length, ok:0, expired:0, bad:0, offline:0, pending:0, viaproxy:0, soon7:0, soon30:0};
-  rows.forEach(r => { c[grp(r.state)]++; if(r.viaProxy) c.viaproxy++;
+  const c = {all:rows.length, ok:0, expired:0, bad:0, offline:0, pending:0, viaproxy:0, soon7:0, soon30:0, chmatch:0};
+  rows.forEach(r => { c[grp(r.state)]++; if(r.viaProxy) c.viaproxy++; if(r.chs && r.chs.count>0) c.chmatch++;
     if(grp(r.state)==='ok' && !r.unlimited && r.days_left!=null && r.days_left>=0){ if(r.days_left<=7) c.soon7++; if(r.days_left<=30) c.soon30++; } });
-  const col = {ok:'var(--ok)',expired:'var(--warn)',bad:'var(--bad)',offline:'var(--off)',pending:'var(--mute)',all:'var(--text)',viaproxy:'#6ee7b7',soon7:'var(--warn)',soon30:'var(--warn)'};
-  $('#stats').innerHTML = FILTERS.map(([k,l]) => `<div class="stat ${filter===k?'sel':''}" data-f="${k}"><b style="color:${col[k]}">${c[k]}</b><span class="small">${l}</span></div>`).join('');
+  const col = {ok:'var(--ok)',expired:'var(--warn)',bad:'var(--bad)',offline:'var(--off)',pending:'var(--mute)',all:'var(--text)',viaproxy:'#6ee7b7',soon7:'var(--warn)',soon30:'var(--warn)',chmatch:'#fbbf24'};
+  $('#stats').innerHTML = FILTERS.filter(([k]) => k!=='chmatch' || hasCh()).map(([k,l]) => `<div class="stat ${filter===k?'sel':''}" data-f="${k}"><b style="color:${col[k]}">${c[k]}</b><span class="small">${l}</span></div>`).join('');
   const n = selected().length;
   $('#bulk').classList.toggle('on', n>0); $('#bulkN').textContent = n;
 }
@@ -2622,7 +2920,7 @@ function flush(){
 
 function setBtns(){
   $('#btnStop').disabled = !running;
-  ['#btnGo','#btnExtract','#btnCheckAll','#btnRecheck','#btnClear','#btnClearText','#bkCheck'].forEach(s => { const e=$(s); if(e) e.disabled = running; });
+  ['#btnGo','#btnExtract','#btnCheckAll','#btnRecheck','#btnClear','#btnClearText','#bkCheck','#btnChSearch'].forEach(s => { const e=$(s); if(e) e.disabled = running; });
 }
 
 function checkPayload(r, extra){
@@ -3523,6 +3821,81 @@ function pvStep(d){
   onItemClick(i);
 }
 
+
+// ---------------- البحث في قنوات السيرفرات ----------------
+const chTerms = () => $('#chq').value.split(/[,،;\n]+/).map(x => x.trim()).filter(x => x.length>=2);
+function renderChSaved(){
+  $('#chSaved').innerHTML = (UI.chTerms||[]).map((t,i) => `<span class="chchip" data-i="${i}" title="بحث بهذه الكلمات">${esc(t)}<i data-x="${i}" title="حذف">✕</i></span>`).join('');
+}
+$('#chSaved').onclick = e => {
+  const x = e.target.closest('[data-x]'); if(x){ UI.chTerms.splice(+x.dataset.x,1); renderChSaved(); saveSoon(); return; }
+  const c = e.target.closest('.chchip'); if(c){ $('#chq').value = UI.chTerms[+c.dataset.i]; $('#btnChSearch').click(); }
+};
+$('#chq').addEventListener('keydown', e => { if(e.key==='Enter'){ e.preventDefault(); $('#btnChSearch').click(); } });
+$('#chq').addEventListener('input', () => { UI.chq = $('#chq').value; saveSoon(); });
+$('#btnChClear').onclick = () => { rows.forEach(r => delete r.chs); if(filter==='chmatch') filter='all'; if(UI.colf) delete UI.colf.chs; render(); };
+$('#btnChSearch').onclick = async () => {
+  if(running) return toast('انتظر حتى ينتهي الفحص الحالي');
+  const terms = chTerms();
+  if(!terms.length) return toast('اكتب اسم القناة (حرفان على الأقل)');
+  let list = rows.filter(r => grp(r.state)==='ok');
+  if(selected().length) list = selected();
+  if(!list.length) return toast('لا توجد سيرفرات شغّالة — افحص السيرفرات أولاً');
+  const label = terms.join(', ');
+  UI.chTerms = [label].concat((UI.chTerms||[]).filter(t => t!==label)).slice(0,10); renderChSaved();
+  const verify = $('#chVerify').checked, force = !!$('#btnChSearch')._force;
+  rows.forEach(r => { if(!list.includes(r)) delete r.chs; });
+  list.forEach(r => r.chs = {busy:true, terms});
+  running = true; stop = false; setBtns(); render();
+  const conc = Math.max(1, Math.min(20, +$('#conc').value || 8));
+  let i = 0, done = 0, found = 0; const total = list.length;
+  $('#bar').style.width = '0%';
+  msg(`جاري البحث عن «${label}» في قنوات ${total} سيرفر...`);
+  async function w(){
+    while(!stop && i < list.length){
+      const r = list[i++];
+      try{
+        const out = await api('/api/chsearch', checkPayload(r, {terms, verify, force, timeout: Math.max(20, +$('#tmo').value || 15)}));
+        r.chs = Object.assign(out, {terms, at: Date.now()});
+        if(out.count>0) found++;
+      }catch(e){ r.chs = {error:'تعذّر الاتصال بالأداة', terms}; }
+      done++; $('#bar').style.width = (done/total*100).toFixed(1)+'%';
+      msg(`البحث في القنوات: ${done}/${total} — وُجدت في ${found} سيرفر`);
+      touch(r);
+    }
+  }
+  await Promise.all(Array.from({length:Math.min(conc,total)}, w));
+  list.forEach(r => { if(r.chs && r.chs.busy) delete r.chs; });
+  running = false; setBtns();
+  msg(stop ? `تم الإيقاف — وُجدت «${label}» في ${found} سيرفر.` : `انتهى البحث: «${label}» موجودة في ${found} من ${total} سيرفر.`);
+  render();
+};
+let chmRow = null;
+function openChMatches(r){
+  chmRow = r; const x = r.chs || {};
+  $('#chmHost').textContent = (r.title || defaultName(r.host)) + (r.username ? ' — ' + r.username : '');
+  const v = x.verified;
+  $('#chmInfo').innerHTML = `البحث: <b>${esc((x.terms||[]).join(', '))}</b> — ${x.count} قناة مطابقة من أصل ${x.total}` +
+    (v ? `<br>${v.ok ? '✅ تم التأكد أن «'+esc(v.name)+'» تبث'+(v.kbps?` (${v.kbps} kbps)`:'') : '⚠️ لم تبث القنوات المجرَّبة: '+esc(v.why||'')}` : '') +
+    (x.count > (x.matches||[]).length ? `<br><span class="small">يُعرض أول ${(x.matches||[]).length} نتيجة.</span>` : '');
+  $('#chmQ').value = ''; drawChm(); $('#chm').classList.add('on');
+}
+function drawChm(){
+  const q = $('#chmQ').value.trim().toLowerCase(), m = ((chmRow && chmRow.chs && chmRow.chs.matches) || []);
+  $('#chmList').innerHTML = m.map((x,i) => [x,i]).filter(([x]) => !q || (x.name+' '+(x.cat||'')).toLowerCase().includes(q))
+    .map(([x,i]) => `<div class="it"><button class="icon" data-i="${i}" title="تشغيل">▶️</button><span title="${esc(x.name)}">${esc(x.name)}</span><em>${esc(x.cat||'')}</em></div>`).join('') || '<div class="small">لا يوجد</div>';
+}
+$('#chmQ').oninput = drawChm;
+$('#chmClose').onclick = () => closeOv('#chm');
+$('#chmList').onclick = async e => {
+  const b = e.target.closest('[data-i]'); if(!b || !chmRow) return;
+  const m = chmRow.chs.matches[+b.dataset.i]; closeOv('#chm');
+  await openPlayer(chmRow, {q: m.name});
+  if(!pv) return;
+  const it = (pv.data.live.items||[]).find(c => (m.cmd && c.cmd===m.cmd) || (m.ou && c.ou===m.ou) || (m.id!=null && !m.cmd && !m.ou && String(c.id)===String(m.id))) || (pv.data.live.items||[]).find(c => c.name===m.name);
+  if(it) playItem(it); else pvMsg('لم أجد القناة في القائمة — اخترها من القائمة.');
+};
+
 // ---------------- أحداث الجدول ----------------
 $('#tb').onclick = async e => {
   const cb = e.target.closest('.rsel');
@@ -3532,6 +3905,7 @@ $('#tb').onclick = async e => {
   const a = b.dataset.act;
   if(a==='play') openPlayer(r);
   else if(a==='info') openDetails(r);
+  else if(a==='chs') openChMatches(r);
   else if(a==='copy'){ await copyText(m3uOf(r)); toast('تم نسخ رابط M3U'); }
   else if(a==='re') runChecks([r]);
   else if(a==='del') delRows([id]);
@@ -3718,6 +4092,7 @@ function fillSettings(){
 }
 $('#btnSet').onclick = async () => { await loadSettings(); fillSettings(); $('#st').classList.add('on'); };
 $('#stClose').onclick = () => closeOv('#st');
+$('#sUpdNow').onclick = () => { closeOv('#st'); checkUpdate(true); };
 $('#sSave').onclick = async () => {
   const d = {timeout:+$('#sTmo').value||15, conc:+$('#sConc').value||8, per_domain:+$('#sDom').value||2, auto_hours:+$('#sAuto').value||0,
     deep_default:$('#sDeep').checked, count_default:$('#sCount').checked, updates:$('#sUpd').checked, ext_player:$('#sPlayer').value,
@@ -3737,19 +4112,40 @@ $('#lgRefresh').onclick = () => showLog(false);
 $('#lgClear').onclick = () => showLog(true);
 $('#lgClose').onclick = () => closeOv('#lg');
 $('#lgCopy').onclick = () => { copyText([...$('#lgTb').querySelectorAll('tr')].map(tr => [...tr.children].map(td => td.textContent).join('\t')).join('\n')); toast('تم نسخ السجل'); };
-async function checkUpdate(){
-  if(SET.updates===false) return;
+async function checkUpdate(force){
+  if(SET.updates===false && !force) return;
   try{
-    const u = await api('/api/update_check', {});
-    if(u && u.newer){ const el = $('#upd'); el.innerHTML = `🔔 يتوفر إصدار أحدث <b class="ltr">${esc(u.version)}</b> — <a href="${esc(u.url)}" target="_blank" rel="noopener" style="color:#93c5fd">صفحة التنزيل</a>`; el.classList.add('on'); }
-  }catch(e){}
+    const u = await api('/api/update_check', {force:!!force});
+    const el = $('#upd');
+    if(u && u.newer){
+      el.innerHTML = `🔔 يتوفر إصدار أحدث <b class="ltr">${esc(u.version)}</b> (الحالي <span class="ltr">${esc(CAPS.version||'')}</span>) — ` +
+        (u.auto ? `<button id="updGo">⬇️ حدّث الآن</button> ` : '') +
+        `<a href="${esc(u.url)}" target="_blank" rel="noopener" style="color:#93c5fd">صفحة الإصدار</a> <span id="updSt" class="small"></span>`;
+      el.classList.add('on');
+      if(u.auto) $('#updGo').onclick = runUpdate;
+    } else if(force){ toast('أنت تستخدم أحدث إصدار'); }
+  }catch(e){ if(force) toast('تعذّر التحقق من التحديثات'); }
+}
+async function runUpdate(){
+  $('#updGo').disabled = true;
+  try{ await saveNow(); }catch(e){}
+  let st;
+  try{ st = await api('/api/update_apply', {}); }catch(e){ $('#updSt').textContent = 'تعذّر بدء التحديث'; $('#updGo').disabled = false; return; }
+  const tick = async () => {
+    try{ st = await api('/api/update_status', {}); }catch(e){ $('#updSt').textContent = '🔄 جاري إعادة التشغيل... يمكنك إغلاق هذه النافذة إن لم تُغلق تلقائياً.'; return; }
+    if(st.stage==='error'){ $('#updSt').textContent = '⚠️ ' + st.error; $('#updGo').disabled = false; return; }
+    $('#updSt').textContent = (st.msg||'') + (st.stage==='download' ? ` ${st.pct||0}%` : '');
+    setTimeout(tick, 700);
+  };
+  tick();
 }
 
 // ---------------- حفظ الجلسة واستعادتها ----------------
 let saveT = 0, lastSaved = '';
 function sessionData(){
   return {v:1, text:$('#inp').value, sort:$('#sort').value, filter, ui:UI, seq,
-    rows: rows.map(r => { const o = Object.assign({}, r); delete o.deepBusy; delete o.sel; if(o.state==='checking') o.state='pending'; return o; })};
+    rows: rows.map(r => { const o = Object.assign({}, r); delete o.deepBusy; delete o.sel; if(o.state==='checking') o.state='pending';
+      if(o.chs){ o.chs = Object.assign({}, o.chs, {matches:(o.chs.matches||[]).slice(0,60)}); if(o.chs.busy) delete o.chs; } return o; })};
 }
 function saveSoon(){ clearTimeout(saveT); saveT = setTimeout(saveNow, 1500); }
 async function saveNow(){
@@ -3771,6 +4167,8 @@ async function restoreSession(){
       toast(`تمت استعادة الجلسة السابقة (${rows.length} سيرفر)`, '🗑 ابدأ من جديد', () => { rows = []; render(); });
     }
     if(d.text && !$('#inp').value) $('#inp').value = d.text;
+    if(UI.chq) $('#chq').value = UI.chq;
+    renderChSaved();
   }catch(e){}
 }
 
@@ -3787,7 +4185,7 @@ document.addEventListener('keydown', e => {
     if(document.body.classList.contains('nfs')){ $('#pvFs').click(); return; }
     if($('#fmenu').classList.contains('on')) return closeFMenu();
     if($('#ov').classList.contains('on')) return pvClose();
-    for(const id of ['#dt','#ad','#st','#lg']) if($(id).classList.contains('on')){ closeOv(id); return; }
+    for(const id of ['#dt','#ad','#st','#lg','#chm']) if($(id).classList.contains('on')){ closeOv(id); return; }
     return;
   }
   if((e.ctrlKey||e.metaKey) && e.key==='Enter' && !running){ e.preventDefault(); $('#btnGo').click(); return; }
@@ -4079,7 +4477,13 @@ class Handler(BaseHTTPRequestHandler):
                 _LOG.clear()
             return {'items': list(_LOG)}
         if path == '/api/update_check':
+            if data.get('force'):
+                return update_check()
             return update_check() if get_settings().get('updates', True) else {'newer': False}
+        if path == '/api/update_apply':
+            return update_apply()
+        if path == '/api/update_status':
+            return dict(_UPD)
         if path == '/api/session':
             if data.get('op') == 'save':
                 return {'ok': _write_json(_SESSION_PATH, data.get('data') or {})}
@@ -4141,6 +4545,15 @@ class Handler(BaseHTTPRequestHandler):
                 return {'ok': True, 'via': launch_external(url, st.get('ext_player', 'auto'), st.get('ext_player_path', ''))}
             except Exception as e:
                 return {'ok': False, 'reason': str(e)[:160]}
+        if path == '/api/chsearch':
+            typ = data.get('type') or 'xtream'
+            hk = data.get('portal') if typ == 'stalker' else (data.get('url') if typ == 'm3u' else data.get('host'))
+            terms = data.get('terms') or []
+            if isinstance(terms, str):
+                terms = re.split(r'[,،;\n]+', terms)
+            with _dom_sem(hk):
+                return channel_search(data, terms, bool(data.get('verify')),
+                                      max(5, min(120, int(data.get('timeout') or 25))), bool(data.get('force')))
         if path == '/api/check':
             t = max(3, min(120, int(data.get('timeout') or DEFAULT_TIMEOUT)))
             proxy = sget('proxy')

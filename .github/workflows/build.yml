@@ -89,7 +89,7 @@ jobs:
           Name: "{autodesktop}\\Mo IPTV Checker"; Filename: "{app}\\{#AppExe}"; Tasks: desktopicon
 
           [Run]
-          Filename: "{app}\\{#AppExe}"; Description: "Launch Mo IPTV Checker"; Flags: nowait postinstall skipifsilent
+          Filename: "{app}\\{#AppExe}"; Description: "Launch Mo IPTV Checker"; Flags: nowait postinstall
           ISS
 
       - name: Install Inno Setup (Windows)
@@ -199,6 +199,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: dl
@@ -210,6 +211,8 @@ jobs:
             b=$(basename "$f" | sed 's/ /_/g; s/^Mo_IPTV_Checker/Mo_IPTV_Checker_'"$T"'/')
             cp "$f" "rel/$b"
           done
+          cp iptv_checker.py rel/iptv_checker.py
+          (cd rel && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt)
           ls -la rel
       - uses: softprops/action-gh-release@v2
         with:
