@@ -32,7 +32,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-VERSION = "6.0"
+VERSION = "6.0.1"
 UA = "VLC/3.0.20 LibVLC/3.0.20"
 DEFAULT_TIMEOUT = 15
 
@@ -3733,8 +3733,10 @@ function saveSoon(){ clearTimeout(saveT); saveT = setTimeout(saveNow, 1500); }
 async function saveNow(){
   try{ const s = JSON.stringify(sessionData()); if(s===lastSaved) return; lastSaved = s; await api('/api/session', {op:'save', data:JSON.parse(s)}); }catch(e){}
 }
+setInterval(() => { fetch('/api/ping', {method:'POST', headers:{'X-IPTV-Checker':'1'}, body:'{}'}).catch(()=>{}); }, 10000);
 window.addEventListener('pagehide', () => {
   try{ navigator.sendBeacon('/api/session?t='+window.__TOKEN__, new Blob([JSON.stringify({op:'save', data:sessionData()})], {type:'application/json'})); }catch(e){}
+  try{ navigator.sendBeacon('/api/bye?t='+window.__TOKEN__, new Blob(['{}'], {type:'application/json'})); }catch(e){}
 });
 async function restoreSession(){
   try{
@@ -3816,6 +3818,7 @@ class Handler(BaseHTTPRequestHandler):
         return secrets.compare_digest(str(q.get('t') or ''), TOKEN)
 
     def do_GET(self):
+        _touch()
         sp = urllib.parse.urlsplit(self.path)
         p = sp.path
         q = _query(sp.query)
@@ -3988,6 +3991,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, 'bad json', 'text/plain; charset=utf-8')
         if not isinstance(data, dict):
             data = {}
+        if path == '/api/bye':                          # النافذة أُغلقت
+            _ALIVE['bye'] = time.time()
+            return self._send(200, '{}', 'application/json; charset=utf-8')
+        if self.headers.get('X-IPTV-Checker') == '1':  # الإرسال عند الإغلاق (beacon) لا يُعدّ نشاطاً
+            _touch()
+        if path == '/api/ping':
+            return self._send(200, '{"ok":true}', 'application/json; charset=utf-8')
         op_ = _opener_for(str(data.get('proxy') or ''))
         try:
             out = self._route(path, data, op_)
@@ -4192,8 +4202,7 @@ def main():
     # المتصفح الافتراضي (الوضع العادي أو كبديل احتياطي)
     threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     try:
-        while True:
-            time.sleep(3600)
+        _wait_for_ui(url, first_wait=120, idle=300)
     except KeyboardInterrupt:
         print("\nStopped.")
 
@@ -4233,6 +4242,40 @@ def _find_chromium():
     return None
 
 
+_ALIVE = {'seen': 0.0, 'bye': 0.0}
+
+
+def _touch():
+    _ALIVE['seen'] = time.time()
+
+
+def _wait_for_ui(url, proc=None, first_wait=40, idle=150):
+    """يبقي الخادم يعمل طالما الواجهة مفتوحة (نبضة كل 10 ثوانٍ).
+    لا نعتمد على انتهاء عملية المتصفح: على ماك يبقى كروم يعمل بعد إغلاق النافذة،
+    وإن كان يعمل مسبقاً تنتهي عملية الإطلاق فوراً وتُسلَّم النافذة للنسخة القائمة."""
+    start = time.time()
+    fallback = False
+    while True:
+        time.sleep(1)
+        now = time.time()
+        seen, bye = _ALIVE['seen'], _ALIVE['bye']
+        if not seen:
+            if now - start > first_wait and not fallback:   # لم تتصل أي نافذة — افتح المتصفح الافتراضي
+                fallback = True
+                start = now
+                try:
+                    webbrowser.open(url)
+                except Exception:
+                    pass
+            elif fallback and now - start > first_wait * 3:
+                return
+            continue
+        if bye and now - bye > 8 and _ALIVE['seen'] <= bye:  # أُغلقت النافذة ولم يُعِد أحد التحميل
+            return
+        if now - seen > idle:
+            return
+
+
 def _open_chrome_app(url):
     """يفتح النافذة بوضع التطبيق (--app) ويبقى حتى تُغلق النافذة."""
     chrome = _find_chromium()
@@ -4246,7 +4289,10 @@ def _open_chrome_app(url):
             '--disable-features=Translate']
     try:
         proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        proc.wait()                                     # ينتظر حتى تُغلق النافذة
+    except Exception:
+        return False
+    try:
+        _wait_for_ui(url, proc)
         return True
     except Exception:
         return False
