@@ -3,13 +3,25 @@ name: Build Mo IPTV Checker
 on:
   push:
     branches: [ main, master ]
+    tags: [ 'v*' ]
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Unit tests (extract)
+        run: python -m unittest -v tests.test_extract
+
   build:
+    needs: test
     strategy:
       fail-fast: false
       matrix:
@@ -118,7 +130,16 @@ jobs:
 
       - name: Build (macOS .app)
         if: matrix.label == 'macos'
-        run: pyinstaller --windowed --noconfirm --name "Mo IPTV Checker" --icon app.icns iptv_checker.py
+        run: |
+          pyinstaller --windowed --noconfirm --name "Mo IPTV Checker" --icon app.icns \
+            --osx-bundle-identifier com.mhassoun500.moiptvchecker iptv_checker.py
+          V=$(python -c "import re;print(re.search(r'VERSION\\s*=\\s*\"([^\"]+)\"',open('iptv_checker.py',encoding='utf-8').read()).group(1))")
+          P="dist/Mo IPTV Checker.app/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Delete :CFBundleDisplayName" "$P" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Mo IPTV Checker" "$P"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $V" "$P"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $V" "$P"
+          codesign --force --deep --sign - "dist/Mo IPTV Checker.app" 
 
       - name: Build .dmg (macOS)
         if: matrix.label == 'macos'
@@ -154,3 +175,25 @@ jobs:
         with:
           name: Mo_IPTV_Checker-${{ matrix.label }}
           path: out/*
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dl
+      - name: Collect files
+        run: |
+          mkdir rel
+          T="${GITHUB_REF_NAME}"
+          for f in dl/*/*; do
+            b=$(basename "$f" | sed 's/ /_/g; s/^Mo_IPTV_Checker/Mo_IPTV_Checker_'"$T"'/')
+            cp "$f" "rel/$b"
+          done
+          ls -la rel
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: rel/*
+          generate_release_notes: true

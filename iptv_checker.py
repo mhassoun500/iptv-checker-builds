@@ -32,7 +32,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-VERSION = "5.9"
+VERSION = "6.0"
 UA = "VLC/3.0.20 LibVLC/3.0.20"
 DEFAULT_TIMEOUT = 15
 
@@ -621,6 +621,7 @@ def _api_fetch(host, qs, timeout, op):
     cands = [host]
     alt = _alt_host(host)
     ci = 0
+    retried = False
     while ci < len(cands):
         h = cands[ci]
         ci += 1
@@ -638,8 +639,12 @@ def _api_fetch(host, qs, timeout, op):
                 last = e
                 net_err = True
                 break
+        timed_out = net_err and ('timed out' in str(last).lower() or isinstance(last, (socket.timeout, TimeoutError)))
+        if timed_out and not retried:                   # إعادة محاولة واحدة تلقائية عند انتهاء المهلة
+            retried = True
+            ci -= 1
+            continue
         if net_err and alt and alt not in cands:
-            timed_out = 'timed out' in str(last).lower() or isinstance(last, (socket.timeout, TimeoutError))
             if (not timed_out) or not re.search(r':\d+', host.split('://', 1)[-1].split('/')[0]):
                 cands.append(alt)
     raise last
@@ -1180,7 +1185,8 @@ def build_xlsx(rows):
         xml.append(f'<row r="{ri}" ht="48" customHeight="1">' + ''.join(cells) + '</row>')
     last = _col(len(heads) - 1)
     xml.append('</sheetData>')
-    xml.append(f'<autoFilter ref="A1:{last}1"/>')
+    fref = f'A1:{last}{max(1, len(rows) + 1)}'
+    xml.append(f'<autoFilter ref="{fref}"/>')
     xml.append('</worksheet>')
     sheet = ''.join(xml)
 
@@ -1206,7 +1212,9 @@ def build_xlsx(rows):
                '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
                '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
                'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-               '<sheets><sheet name="السيرفرات" sheetId="1" r:id="rId1"/></sheets></workbook>')
+               '<sheets><sheet name="السيرفرات" sheetId="1" r:id="rId1"/></sheets>'
+               '<definedNames><definedName name="_xlnm._FilterDatabase" localSheetId="0" hidden="1">'
+               f"'السيرفرات'!$A$1:${last}${max(1, len(rows) + 1)}</definedName></definedNames></workbook>")
     z.writestr('xl/_rels/workbook.xml.rels',
                '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
                '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
@@ -1422,7 +1430,9 @@ def hist_key(typ, d):
         return 'stalker|' + _dom_key(d.get('portal')) + '|' + str(d.get('mac') or '').upper()
     if typ == 'm3u':
         return 'm3u|' + str(d.get('url') or '').lower().rstrip('/')
-    return str(d.get('host') or '').lower().rstrip('/') + '|' + str(d.get('username') or '')
+    import hashlib
+    pw = hashlib.sha1(str(d.get('password') or '').encode('utf-8')).hexdigest()[:10]
+    return str(d.get('host') or '').lower().rstrip('/') + '|' + str(d.get('username') or '') + '|' + pw
 
 
 # ---------------- الفحص العميق للبث ----------------
@@ -1959,7 +1969,7 @@ HTML = r"""<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Mo IPTV Checker</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230e1318'/%3E%3Cpath d='M20 22a24 24 0 0 1 24 24' fill='none' stroke='%2322c55e' stroke-width='4' stroke-linecap='round'/%3E%3Cpath d='M20 32a14 14 0 0 1 14 14' fill='none' stroke='%233b82f6' stroke-width='4' stroke-linecap='round'/%3E%3Ccircle cx='21' cy='45' r='4.5' fill='%233b82f6'/%3E%3Cpath d='M34 17l17 9.5-17 9.5z' fill='%23e6edf3'/%3E%3C/svg%3E">
-<script>window.__PROXY__=__PROXYJSON__;window.__TOKEN__="__TOKEN__";</script>
+<script>window.__PROXY__=__PROXYJSON__;window.__TOKEN__="__TOKVAL__";</script>
 <style>
 :root{--bg:#0e1318;--card:#171e26;--line:#26313d;--text:#e6edf3;--mute:#8b98a5;--acc:#3b82f6;--ok:#22c55e;--warn:#f59e0b;--bad:#ef4444;--off:#a855f7}
 *{box-sizing:border-box}
@@ -1992,6 +2002,20 @@ input[type=number]{width:66px}
 table{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed}
 th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:right;vertical-align:middle;word-break:break-word;overflow-wrap:anywhere}
 th{color:var(--mute);font-weight:600;position:sticky;top:0;background:var(--card);z-index:1}
+.thf{display:flex;align-items:center;gap:4px;justify-content:space-between}
+.fbtn{background:#0a0e12;border:1px solid var(--line);color:var(--mute);border-radius:5px;padding:0 5px;font-size:11px;line-height:18px;cursor:pointer;flex:0 0 auto}
+.fbtn:hover{color:var(--text);border-color:var(--acc)}
+.fbtn.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+#fmenu{position:fixed;z-index:60;width:250px;max-height:420px;display:none;flex-direction:column;gap:6px;padding:10px}
+#fmenu.on{display:flex}
+#fmenu .fl{overflow:auto;max-height:260px;border:1px solid var(--line);border-radius:8px;padding:4px 6px}
+#fmenu label{display:flex;gap:6px;align-items:center;padding:2px;cursor:pointer;font-size:13px}
+#fmenu label span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#fmenu label em{color:var(--mute);font-style:normal;font-size:11px}
+#fmenu .frow{display:flex;gap:6px}
+#fmenu .frow button{flex:1;padding:5px 8px;font-size:12px}
+#clrF{display:none}
+#clrF.on{display:inline-block}
 tr:hover td{background:#1c2530}
 tr.dragging{opacity:.4}
 tr.bestrow td{background:#132617}
@@ -2199,6 +2223,7 @@ http://example.com:8080/live/USER/PASS/12345.ts"></textarea>
     <button class="sec" id="btnCopy">📋 نسخ روابط الشغالة</button>
     <button class="sec" id="btnM3uFile">📃 ملف M3U للشغّالة</button>
     <span style="position:relative"><button class="sec" id="btnCols">🧱 الأعمدة</button><div class="menu" id="colmenu"></div></span>
+    <button class="sec" id="clrF" title="إزالة كل فلاتر الأعمدة">🧹 مسح فلاتر الأعمدة</button>
     <button class="sec" id="btnCsv">⬇️ تصدير إلى إكسل</button>
     <button class="sec" id="btnSave">💾 حفظ مشروع</button>
     <button class="sec" id="btnImport">📁 استيراد مشروع</button>
@@ -2268,6 +2293,8 @@ http://example.com:8080/live/USER/PASS/12345.ts"></textarea>
     </div>
   </div>
 </div>
+
+<div class="menu" id="fmenu"></div>
 
 <div class="ov" id="dt"><div class="modal sm" style="max-width:760px">
   <div class="mhead"><b>🔍 تفاصيل السيرفر</b><span class="small ltr" id="dtHost" style="flex:1;overflow:hidden;text-overflow:ellipsis"></span><button class="danger" id="dtClose">إغلاق ✕</button></div>
@@ -2459,10 +2486,69 @@ function rowHtml(r, i){
 function renderHead(){
   const cols = shownCols();
   $('#cg').innerHTML = cols.map(c => `<col style="width:${c[2]}px">`).join('');
-  $('#hr').innerHTML = cols.map(c => c[0]==='sel' ? '<th><input type="checkbox" id="selAll" title="تحديد الكل"></th>' : `<th>${c[1]}</th>`).join('');
+  const cf = UI.colf || {};
+  $('#hr').innerHTML = cols.map(c => c[0]==='sel' ? '<th><input type="checkbox" id="selAll" title="تحديد الكل"></th>'
+    : FCOL[c[0]] ? `<th><div class="thf"><span>${c[1]}</span><button class="fbtn ${cf[c[0]]?'on':''}" data-fc="${c[0]}" title="فلتر العمود">▾</button></div></th>` : `<th>${c[1]}</th>`).join('');
+  $('#clrF').classList.toggle('on', Object.keys(cf).length>0);
 }
 
-function visible(){
+// ---------------- فلاتر الأعمدة (مثل إكسل) ----------------
+const bucketDays = r => r.unlimited ? 'غير محدود ∞' : r.days_left==null ? '— غير معروف' : r.days_left<0 ? 'منتهي' : r.days_left<=7 ? '0–7 أيام' : r.days_left<=30 ? '8–30 يوماً' : r.days_left<=90 ? '31–90 يوماً' : r.days_left<=365 ? '91–365 يوماً' : 'أكثر من سنة';
+const FCOL = {
+  st: r => (ST[r.state]||ST.error)[0],
+  host: r => String(r.host||'').replace(/^https?:\/\//i,'').replace(/\/+$/,'').toLowerCase() || '—',
+  user: r => r.username || '—',
+  pass: r => r.password || '—',
+  exp: r => r.exp_date || (r.unlimited ? '∞' : '—'),
+  days: bucketDays,
+  conn: r => r.max_cons!=null ? 'حد '+r.max_cons : '—',
+  ping: r => r.ping_ms==null ? '—' : r.ping_ms<400 ? 'أقل من 400 ms' : r.ping_ms<1000 ? '400–1000 ms' : r.ping_ms<3000 ? '1–3 ث' : 'أكثر من 3 ث',
+  q: r => (QL[r.quality]||['—'])[0],
+  score: r => { const v = scoreOf(r); return v==null ? '—' : v>=75 ? '75–100' : v>=50 ? '50–74' : 'أقل من 50'; },
+  note: r => (r.note||'').trim() || '— بدون',
+  name: r => (r.title || defaultName(r.host)) || '—',
+};
+const passCol = (r, skip) => { const cf = UI.colf || {}; for(const c in cf){ if(c===skip || !FCOL[c]) continue; if(!cf[c].includes(FCOL[c](r))) return false; } return true; };
+let fmCol = null;
+function openFMenu(col, btn){
+  fmCol = col;
+  const base = baseList().filter(r => passCol(r, col));
+  const cnt = new Map(); base.forEach(r => { const v = FCOL[col](r); cnt.set(v, (cnt.get(v)||0)+1); });
+  const cur = (UI.colf||{})[col];
+  (cur||[]).forEach(v => { if(!cnt.has(v)) cnt.set(v, 0); });
+  const vals = [...cnt.keys()].sort((a,b) => String(a).localeCompare(String(b), 'ar', {numeric:true}));
+  const m = $('#fmenu');
+  m.innerHTML = `<input type="search" id="fmQ" placeholder="بحث في القيم...">
+    <label><input type="checkbox" id="fmAll"> <span><b>تحديد الكل</b></span></label>
+    <div class="fl">${vals.map(v => `<label><input type="checkbox" class="fmv" value="${esc(v)}" ${!cur||cur.includes(v)?'checked':''}> <span title="${esc(v)}">${esc(v)}</span><em>${cnt.get(v)}</em></label>`).join('')}</div>
+    <div class="frow"><button id="fmOk">تطبيق</button><button class="sec" id="fmClr">مسح الفلتر</button></div>`;
+  const syncAll = () => { const b = [...m.querySelectorAll('.fmv')].filter(x => x.closest('label').style.display!=='none'); $('#fmAll').checked = b.length>0 && b.every(x => x.checked); };
+  syncAll();
+  $('#fmQ').oninput = () => { const q = $('#fmQ').value.trim().toLowerCase(); m.querySelectorAll('.fmv').forEach(x => x.closest('label').style.display = !q || x.value.toLowerCase().includes(q) ? '' : 'none'); syncAll(); };
+  $('#fmAll').onchange = () => { m.querySelectorAll('.fmv').forEach(x => { if(x.closest('label').style.display!=='none') x.checked = $('#fmAll').checked; }); };
+  m.querySelector('.fl').onchange = syncAll;
+  $('#fmOk').onclick = () => {
+    const all = [...m.querySelectorAll('.fmv')], on = all.filter(x => x.checked).map(x => x.value);
+    UI.colf = UI.colf || {};
+    if(on.length===all.length) delete UI.colf[col]; else UI.colf[col] = on;
+    closeFMenu(); render();
+  };
+  $('#fmClr').onclick = () => { if(UI.colf) delete UI.colf[col]; closeFMenu(); render(); };
+  m.classList.add('on');
+  const rc = btn.getBoundingClientRect(), w = m.offsetWidth, h = m.offsetHeight;
+  m.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, rc.right - w)) + 'px';
+  m.style.top = Math.max(8, Math.min(window.innerHeight - h - 8, rc.bottom + 4)) + 'px';
+  $('#fmQ').focus();
+}
+function closeFMenu(){ $('#fmenu').classList.remove('on'); fmCol = null; }
+$('#fmenu').onclick = e => e.stopPropagation();
+$('#fmenu').addEventListener('keydown', e => { if(e.key==='Enter'){ e.preventDefault(); $('#fmOk').click(); } });
+document.addEventListener('click', closeFMenu);
+window.addEventListener('resize', closeFMenu);
+$('#clrF').onclick = () => { UI.colf = {}; render(); toast('تم مسح كل فلاتر الأعمدة'); };
+
+function visible(){ return sortList(baseList().filter(r => passCol(r, null))); }
+function baseList(){
   const q = $('#q').value.trim().toLowerCase();
   const fm = r => {
     if(filter==='all') return true;
@@ -2470,7 +2556,9 @@ function visible(){
     if(filter==='soon7' || filter==='soon30'){ const n = filter==='soon7' ? 7 : 30; return grp(r.state)==='ok' && !r.unlimited && r.days_left!=null && r.days_left>=0 && r.days_left<=n; }
     return grp(r.state)===filter;
   };
-  let list = rows.filter(r => fm(r) && (!q || (r.host+' '+r.username+' '+(r.note||'')+' '+(r.title||'')).toLowerCase().includes(q)));
+  return rows.filter(r => fm(r) && (!q || (r.host+' '+r.username+' '+(r.note||'')+' '+(r.title||'')).toLowerCase().includes(q)));
+}
+function sortList(list){
   const s = $('#sort').value;
   const dv = r => r.unlimited ? 1e9 : (r.days_left ?? -1e9);
   if(s==='daysDesc') list.sort((a,b)=>dv(b)-dv(a));
@@ -2507,7 +2595,7 @@ function touch(r){ dirty.add(r.id); scheduleRender(); }
 function scheduleRender(){ if(renderQueued) return; renderQueued = true; requestAnimationFrame(flush); }
 function flush(){
   renderQueued = false;
-  const plain = $('#sort').value==='orig' && filter==='all' && !$('#q').value.trim();
+  const plain = $('#sort').value==='orig' && filter==='all' && !$('#q').value.trim() && !Object.keys(UI.colf||{}).length;
   const ae = document.activeElement, editing = !!(ae && ae.closest && ae.closest('#tb'));
   if(dirty.size && plain){
     computeDup();
@@ -2548,6 +2636,11 @@ function newRow(a){
   if(!r.type) r.type = 'xtream';
   return r;
 }
+// إن كانت فلاتر الأعمدة تخفي سيرفرات أُضيفت للتو فأزلها حتى لا تختفي الإضافة
+function unhideNew(list){
+  if(!Object.keys(UI.colf||{}).length || !list.length) return;
+  if(list.some(r => !passCol(r, null))){ UI.colf = {}; toast('تم مسح فلاتر الأعمدة لإظهار السيرفرات المضافة'); }
+}
 async function doExtract(){
   const text = $('#inp').value;
   if(!text.trim()){ msg('الصق السيرفرات أولاً.'); return []; }
@@ -2563,6 +2656,7 @@ async function doExtract(){
     else if(!hasPort(r.host) && hasPort(a.host)){ r.host = a.host; r.m3u = ''; }
     current.push(r);
   }
+  unhideNew(current);
   msg(res.accounts.length ? `تم استخراج ${res.accounts.length} حساب (${added} جديد).` : 'لم يتم العثور على بيانات سيرفرات في النص.');
   render();
   return current;
@@ -3422,7 +3516,7 @@ $('#tb').onclick = async e => {
   else if(a==='up') moveRow(id, -1);
   else if(a==='down') moveRow(id, 1);
 };
-$('#hr').onclick = e => { if(e.target.id==='selAll'){ const on = e.target.checked; visible().forEach(r => r.sel = on); render(); } };
+$('#hr').onclick = e => { const fb = e.target.closest('.fbtn'); if(fb){ e.stopPropagation(); if(fmCol===fb.dataset.fc && $('#fmenu').classList.contains('on')) closeFMenu(); else openFMenu(fb.dataset.fc, fb); return; } if(e.target.id==='selAll'){ const on = e.target.checked; visible().forEach(r => r.sel = on); render(); } };
 $('#tb').addEventListener('change', e => {
   const ts = e.target.closest('.typesel'); if(!ts) return;
   const r = rows.find(x => x.id === +ts.closest('tr').dataset.id); if(!r) return;
@@ -3488,7 +3582,7 @@ $('#tb').addEventListener('input', e => {
 
 // ---------------- الترتيب اليدوي بالسحب ----------------
 let dragId = null;
-function manualMode(){ return $('#sort').value==='orig' && filter==='all' && !$('#q').value.trim(); }
+function manualMode(){ return $('#sort').value==='orig' && filter==='all' && !$('#q').value.trim() && !Object.keys(UI.colf||{}).length; }
 $('#tb').addEventListener('dragstart', e => {
   const tr = e.target.closest('tr'); if(!tr) return;
   if(!manualMode()){ e.preventDefault(); toast('للترتيب اليدوي: اختر «يدوي» وأزل البحث والتصفية'); return; }
@@ -3565,7 +3659,7 @@ $('#adGo').onclick = () => {
   else a = {type:'m3u', host, m3uurl:host, username:'', password:''};
   if($('#adName').value.trim()) a.title = $('#adName').value.trim();
   if(rows.some(r => key(r)===key(a))) return toast('هذا السيرفر موجود مسبقاً');
-  const r = newRow(a); rows.push(r); closeOv('#ad'); ['#adHost','#adUser','#adPass','#adName'].forEach(s => $(s).value=''); render(); runChecks([r]);
+  const r = newRow(a); rows.push(r); unhideNew([r]); closeOv('#ad'); ['#adHost','#adUser','#adPass','#adName'].forEach(s => $(s).value=''); render(); runChecks([r]);
 };
 
 // ---------------- الأعمدة ----------------
@@ -3666,6 +3760,7 @@ setInterval(() => {
 document.addEventListener('keydown', e => {
   const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName||'');
   if(e.key==='Escape'){
+    if($('#fmenu').classList.contains('on')) return closeFMenu();
     if($('#ov').classList.contains('on')) return pvClose();
     for(const id of ['#dt','#ad','#st','#lg']) if($(id).classList.contains('on')){ closeOv(id); return; }
     return;
@@ -3726,7 +3821,7 @@ class Handler(BaseHTTPRequestHandler):
         q = _query(sp.query)
         if p in ('/', '/index.html'):
             page = (HTML.replace('__VER__', VERSION).replace('__PROXYJSON__', json.dumps(_PROXY.get('url', '')))
-                    .replace('__TOKEN__', TOKEN))
+                    .replace("__TOKVAL__", TOKEN))
             self._send(200, page, 'text/html; charset=utf-8')
         elif p.startswith('/lib/'):
             data = get_lib(p[5:])
