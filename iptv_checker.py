@@ -2229,7 +2229,7 @@ HTML = r"""<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Mo IPTV Checker</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230e1318'/%3E%3Cpath d='M20 22a24 24 0 0 1 24 24' fill='none' stroke='%2322c55e' stroke-width='4' stroke-linecap='round'/%3E%3Cpath d='M20 32a14 14 0 0 1 14 14' fill='none' stroke='%233b82f6' stroke-width='4' stroke-linecap='round'/%3E%3Ccircle cx='21' cy='45' r='4.5' fill='%233b82f6'/%3E%3Cpath d='M34 17l17 9.5-17 9.5z' fill='%23e6edf3'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E %3Cdefs%3E %3ClinearGradient id=%22bg%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22%3E%3Cstop offset=%220%22 stop-color=%22%2316202b%22/%3E%3Cstop offset=%221%22 stop-color=%22%230a0f14%22/%3E%3C/linearGradient%3E %3ClinearGradient id=%22scr%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22%3E%3Cstop offset=%220%22 stop-color=%22%233b82f6%22/%3E%3Cstop offset=%221%22 stop-color=%22%231d4ed8%22/%3E%3C/linearGradient%3E %3ClinearGradient id=%22ok%22 x1=%220%22 y1=%220%22 x2=%220%22 y2=%221%22%3E%3Cstop offset=%220%22 stop-color=%22%234ade80%22/%3E%3Cstop offset=%221%22 stop-color=%22%2316a34a%22/%3E%3C/linearGradient%3E %3C/defs%3E %3Crect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22url(%23bg)%22/%3E %3Cpath d=%22M24 10.5l8 6.5 8-6.5%22 fill=%22none%22 stroke=%22%2393c5fd%22 stroke-width=%222.6%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22/%3E %3Crect x=%228%22 y=%2217%22 width=%2248%22 height=%2232%22 rx=%226%22 fill=%22url(%23scr)%22/%3E %3Crect x=%2211.5%22 y=%2220.5%22 width=%2241%22 height=%2225%22 rx=%223.5%22 fill=%22%230b1220%22/%3E %3Cpath d=%22M14.5 40.5V26.5l6.3 8.2 6.3-8.2v14%22 fill=%22none%22 stroke=%22%23e6edf3%22 stroke-width=%223.6%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22/%3E %3Ccircle cx=%2234.6%22 cy=%2234.6%22 r=%225%22 fill=%22none%22 stroke=%22%2360a5fa%22 stroke-width=%223.6%22/%3E %3Crect x=%2225%22 y=%2251.5%22 width=%2214%22 height=%223%22 rx=%221.5%22 fill=%22%233b82f6%22/%3E %3Ccircle cx=%2248%22 cy=%2245%22 r=%2211%22 fill=%22%230a0f14%22/%3E %3Ccircle cx=%2248%22 cy=%2245%22 r=%229%22 fill=%22url(%23ok)%22/%3E %3Cpath d=%22M43.6 45.2l3.1 3.1 5.8-6.3%22 fill=%22none%22 stroke=%22%23fff%22 stroke-width=%222.8%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22/%3E %3C/svg%3E">
 <script>window.__PROXY__=__PROXYJSON__;window.__TOKEN__="__TOKVAL__";</script>
 <style>
 :root{--bg:#0e1318;--card:#171e26;--line:#26313d;--text:#e6edf3;--mute:#8b98a5;--acc:#3b82f6;--ok:#22c55e;--warn:#f59e0b;--bad:#ef4444;--off:#a855f7}
@@ -2281,6 +2281,7 @@ tr:hover td{background:#1c2530}
 tr.dragging{opacity:.4}
 tr.bestrow td{background:#132617}
 tr.chrow td{background:#2b2108}
+tr.hi td{background:#16325c !important;transition:background .3s}
 tr.chrow td:first-child{box-shadow:inset -4px 0 0 #f59e0b}
 #chbox{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#1a1606;border:1px solid #5b4a12;border-radius:10px;padding:8px 12px;margin-bottom:12px}
 #chbox input[type=search]{flex:1 1 260px;min-width:0}
@@ -2368,6 +2369,8 @@ body.nfs #pvVideo{width:100vw;height:100vh;max-height:100vh;border-radius:0}
 .q-excellent{background:#123d24;color:#86efac}.q-good{background:#233d17;color:#bef264}.q-weak{background:#4a3208;color:#fcd34d}
 .q-none{background:#4c1414;color:#fca5a5}.q-unknown{background:#26313d;color:var(--mute)}
 .score{font-weight:700}
+.ordin{width:38px;padding:2px 3px;text-align:center;font-size:12px;margin-inline-start:3px;background:#0a0e12;border:1px solid var(--line);border-radius:5px;color:var(--text)}
+.ordin:focus{border-color:var(--acc);outline:none}
 .tagb{display:inline-block;background:#2a2147;color:#c4b5fd;border-radius:6px;padding:0 5px;font-size:11px;margin-inline-start:4px}
 .menu{position:absolute;z-index:40;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 10px;display:none;min-width:180px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
 .menu.on{display:block}
@@ -2394,12 +2397,22 @@ body.nfs #pvVideo{width:100vw;height:100vh;max-height:100vh;border-radius:0}
 <body>
 <header>
   <svg class="logo" viewBox="0 0 64 64" width="40" height="40" aria-hidden="true">
-    <rect width="64" height="64" rx="14" fill="#0e1318"/>
-    <path d="M20 22a24 24 0 0 1 24 24" fill="none" stroke="#22c55e" stroke-width="4" stroke-linecap="round"/>
-    <path d="M20 32a14 14 0 0 1 14 14" fill="none" stroke="#3b82f6" stroke-width="4" stroke-linecap="round"/>
-    <circle cx="21" cy="45" r="4.5" fill="#3b82f6"/>
-    <path d="M34 17l17 9.5-17 9.5z" fill="#e6edf3"/>
-  </svg>
+  <defs>
+    <linearGradient id="lg-bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#16202b"/><stop offset="1" stop-color="#0a0f14"/></linearGradient>
+    <linearGradient id="lg-scr" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3b82f6"/><stop offset="1" stop-color="#1d4ed8"/></linearGradient>
+    <linearGradient id="lg-ok" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4ade80"/><stop offset="1" stop-color="#16a34a"/></linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#lg-bg)"/>
+  <path d="M24 10.5l8 6.5 8-6.5" fill="none" stroke="#93c5fd" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="8" y="17" width="48" height="32" rx="6" fill="url(#lg-scr)"/>
+  <rect x="11.5" y="20.5" width="41" height="25" rx="3.5" fill="#0b1220"/>
+  <path d="M14.5 40.5V26.5l6.3 8.2 6.3-8.2v14" fill="none" stroke="#e6edf3" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="34.6" cy="34.6" r="5" fill="none" stroke="#60a5fa" stroke-width="3.6"/>
+  <rect x="25" y="51.5" width="14" height="3" rx="1.5" fill="#3b82f6"/>
+  <circle cx="48" cy="45" r="11" fill="#0a0f14"/>
+  <circle cx="48" cy="45" r="9" fill="url(#lg-ok)"/>
+  <path d="M43.6 45.2l3.1 3.1 5.8-6.3" fill="none" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
   <div>
     <h1 class="ltr" style="letter-spacing:.3px">Mo <span style="color:var(--acc)">IPTV</span> Checker</h1>
     <span class="small">فاحص سيرفرات IPTV — يعمل محلياً على جهازك — الإصدار <span class="ltr">__VER__</span></span>
@@ -2738,7 +2751,7 @@ function cellHtml(c, r, i){
   const [lbl, cls] = ST[r.state] || ST.error;
   switch(c){
     case 'sel': return `<td><input type="checkbox" class="rsel" ${r.sel?'checked':''}></td>`;
-    case 'n': return `<td class="drag" title="اسحب لإعادة الترتيب">⠿ ${i+1}</td>`;
+    case 'n': return `<td class="drag" title="اسحب لإعادة الترتيب، أو اكتب رقم الترتيب ثم Enter"><span class="dh">⠿</span><input type="text" inputmode="numeric" class="ordin ltr" data-id="${r.id}" value="${i+1}" data-v="${i+1}"></td>`;
     case 'st': return `<td><span class="b ${cls}">${lbl}</span>${changeBadge(r) ? '<br>'+changeBadge(r) : ''}</td>`;
     case 'host': {
       const di = dupInfo[r.id];
@@ -3912,6 +3925,26 @@ $('#tb').onclick = async e => {
   else if(a==='up') moveRow(id, -1);
   else if(a==='down') moveRow(id, 1);
 };
+// رقم الترتيب: يكتب المستخدم الموضع الجديد فيُنقل السيرفر إليه وتُرحَّل الباقية للأسفل
+const toLatin = v => String(v).replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d));
+function applyOrder(el){
+  const n = parseInt(toLatin(el.value).replace(/[^0-9]/g,''), 10), old = +el.dataset.v;
+  if(!n || n===old){ el.value = old; return; }
+  const id = +el.dataset.id;
+  bakeOrder();
+  const vis = visible(), from = vis.findIndex(r => r.id===id); if(from<0) return;
+  const to = Math.max(1, Math.min(vis.length, n)) - 1;
+  const r = rows.splice(rows.findIndex(x => x.id===id), 1)[0];
+  const anchor = vis.filter(x => x.id!==id)[to];          // ضعه قبل السيرفر الذي يشغل هذا الموضع الآن
+  const at = anchor ? rows.indexOf(anchor) : rows.length;
+  rows.splice(at, 0, r);
+  render();
+  const ni = $('#tb').querySelector(`.ordin[data-id="${id}"]`); if(ni){ ni.closest('tr').scrollIntoView({block:'center'}); ni.closest('tr').classList.add('hi'); setTimeout(()=>ni.closest('tr') && ni.closest('tr').classList.remove('hi'), 1500); }
+  msg(`تم نقل السيرفر إلى الترتيب ${to+1}.`);
+}
+$('#tb').addEventListener('keydown', e => { const el = e.target.closest('.ordin'); if(el && e.key==='Enter'){ e.preventDefault(); el.blur(); } });
+$('#tb').addEventListener('focusout', e => { const el = e.target.closest('.ordin'); if(el) applyOrder(el); });
+$('#tb').addEventListener('focusin', e => { const el = e.target.closest('.ordin'); if(el) el.select(); });
 $('#hr').onclick = e => { const fb = e.target.closest('.fbtn'); if(fb){ e.stopPropagation(); if(fmCol===fb.dataset.fc && $('#fmenu').classList.contains('on')) closeFMenu(); else openFMenu(fb.dataset.fc, fb); return; } if(e.target.id==='selAll'){ const on = e.target.checked; visible().forEach(r => r.sel = on); render(); } };
 $('#tb').addEventListener('change', e => {
   const ts = e.target.closest('.typesel'); if(!ts) return;
