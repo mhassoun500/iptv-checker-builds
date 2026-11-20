@@ -32,7 +32,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-VERSION = "6.4"
+VERSION = "6.5"
 UA = "VLC/3.0.20 LibVLC/3.0.20"
 DEFAULT_TIMEOUT = 15
 
@@ -145,7 +145,7 @@ def save_cfg(d):
 
 DEFAULT_SETTINGS = {'per_domain': 2, 'ffmpeg_path': '', 'ext_player': 'auto', 'ext_player_path': '',
                     'ext_direct': False, 'updates': True, 'auto_hours': 0, 'deep_default': False,
-                    'count_default': False, 'timeout': 15, 'conc': 8}
+                    'count_default': False, 'timeout': 15, 'conc': 8, 'adult_scan': True}
 
 
 def get_settings():
@@ -1150,8 +1150,8 @@ def _cell(ref, xf, val, num=False):
 def build_xlsx(rows):
     heads = ['الحالة', 'السيرفر', 'المستخدم', 'كلمة المرور', 'تاريخ الانتهاء', 'المتبقي (أيام)',
              'الاتصالات', 'تاريخ الإنشاء', 'الاستجابة (ms)', 'ملاحظات', 'رابط M3U',
-             'البيانات (هوست/مستخدم/مرور)', 'البيانات مع الدلالة']
-    widths = [17, 34, 18, 18, 18, 14, 12, 14, 14, 40, 52, 40, 44]
+             'البيانات (هوست/مستخدم/مرور)', 'البيانات مع الدلالة', 'محتوى للكبار']
+    widths = [17, 34, 18, 18, 18, 14, 12, 14, 14, 40, 52, 40, 44, 14]
     xml = ['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
            '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
            '<sheetViews><sheetView rightToLeft="1" tabSelected="1" workbookViewId="0">',
@@ -1188,6 +1188,7 @@ def build_xlsx(rows):
             (7, r.get('m3u', ''), False),
             (9, '\n'.join([r.get('host', ''), r.get('username', ''), r.get('password', '')]), False),
             (9, 'Host: ' + r.get('host', '') + '\nUser: ' + r.get('username', '') + '\nPass: ' + r.get('password', ''), False),
+            (8, ('نعم 🔞' if (r.get('adult') or {}).get('adult') else ('لا' if r.get('adult') else '')), False),
         ]
         cells = [_cell(f'{_col(i)}{ri}', xf, val, num=num) for i, (xf, val, num) in enumerate(vals)]
         xml.append(f'<row r="{ri}" ht="48" customHeight="1">' + ''.join(cells) + '</row>')
@@ -1800,6 +1801,45 @@ def channel_search(d, terms, verify=False, timeout=25, force=False):
     return out
 
 
+# ---------------- كشف المحتوى المخصص للكبار ----------------
+_ADULT_RE = re.compile(
+    r'(xxx|\badults?\b|\b18\s*\+|\+\s*18\b|\bporn|\bsex\b|\bsexy\b|erotic|playboy|brazzers|hustler|penthouse|'
+    r'redlight|red\s*light|\bhot\s*club\b|\bxx\b|\bnsfw\b|للكبار|كبار\s*فقط|سكس|اباحي|إباحي|\+١٨|١٨\+)', re.I)
+
+_ADULT_NOT = re.compile(r'(adult\s*swim|young\s+adults?|sex\s+and\s+the\s+city|sex\s+education|sex\s*/\s*life|sex\s+lives)', re.I)
+
+
+def adult_scan(d, timeout=20):
+    """يفحص أسماء التصنيفات (وأسماء القنوات في M3U وستالكر) بحثاً عن محتوى للكبار."""
+    typ = d.get('type') or 'xtream'
+    out = {'adult': False, 'hits': [], 'error': ''}
+    names = []
+    try:
+        if typ == 'xtream':
+            host = str(d.get('host') or '').rstrip('/')
+            qs = urllib.parse.urlencode({'username': d.get('username', ''), 'password': d.get('password', '')})
+            op = _opener_for(str(d.get('proxy') or ''))
+            for act, lbl in (('get_live_categories', 'قنوات'), ('get_vod_categories', 'أفلام'),
+                             ('get_series_categories', 'مسلسلات')):
+                names += [(lbl, n) for n in _cats(host, qs, act, timeout, op).values()]
+        else:
+            items = _channel_list(d, timeout)
+            cats = sorted({str(x.get('cat') or '') for x in items if x.get('cat')})
+            names += [('تصنيف', c) for c in cats]
+            names += [('قناة', str(x.get('name') or '')) for x in items]
+    except Exception as e:
+        out['error'] = str(e)[:150]
+        return out
+    seen = set()
+    for lbl, n in names:
+        if n and _ADULT_RE.search(_ADULT_NOT.sub(' ', n)) and n not in seen:
+            seen.add(n)
+            out['hits'].append(f'{lbl}: {n}'[:80])
+    out['adult'] = bool(out['hits'])
+    out['hits'] = out['hits'][:30]
+    return out
+
+
 
 def stalker_channels(portal, mac, proxy='', timeout=20):
     out = {'cats': {}, 'items': [], 'error': ''}
@@ -2382,6 +2422,7 @@ body.nfs #pvVideo{width:100vw;height:100vh;max-height:100vh;border-radius:0}
 .score{font-weight:700}
 .ordin{width:38px;padding:2px 3px;text-align:center;font-size:12px;margin-inline-start:3px;background:#0a0e12;border:1px solid var(--line);border-radius:5px;color:var(--text)}
 .ordin:focus{border-color:var(--acc);outline:none}
+.adb{display:inline-block;background:#4c1414;color:#fecaca;border:1px solid #991b1b;border-radius:6px;padding:0 4px;font-size:11px;margin-inline-end:3px;cursor:help}
 .tagb{display:inline-block;background:#2a2147;color:#c4b5fd;border-radius:6px;padding:0 5px;font-size:11px;margin-inline-start:4px}
 .menu{position:absolute;z-index:40;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 10px;display:none;min-width:180px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
 .menu.on{display:block}
@@ -2666,6 +2707,7 @@ http://example.com:8080/live/USER/PASS/12345.ts"></textarea>
     </div>
     <label class="opt"><input type="checkbox" id="sDeep"> تفعيل الفحص العميق افتراضياً</label>
     <label class="opt"><input type="checkbox" id="sCount"> تفعيل عدّ القنوات افتراضياً</label>
+    <label class="opt"><input type="checkbox" id="sAdult"> تمييز السيرفرات التي تحتوي محتوى للكبار 🔞 (يفحص أسماء التصنيفات بعد كل فحص)</label>
     <label class="opt"><input type="checkbox" id="sUpd"> التحقق من وجود تحديثات عند التشغيل</label>
     <hr style="border-color:var(--line)">
     <div class="srow">
@@ -2695,7 +2737,7 @@ const ST = {
   expired:['منتهي ⌛','s-expired'], invalid:['بيانات خاطئة','s-invalid'],
   blocked:['محظور / معطّل','s-invalid'], offline:['لا يستجيب ❌','s-offline'], error:['خطأ','s-offline']
 };
-const FILTERS = [['all','الإجمالي'],['ok','يعمل'],['expired','منتهي'],['bad','بيانات خاطئة / محظور'],['offline','لا يستجيب / خطأ'],['pending','لم يُفحص'],['viaproxy','تعمل عبر VPN'],['soon7','ينتهي ≤ 7 أيام'],['soon30','ينتهي ≤ 30 يوماً'],['chmatch','📺 يحتوي القنوات المطلوبة']];
+const FILTERS = [['all','الإجمالي'],['ok','يعمل'],['expired','منتهي'],['bad','بيانات خاطئة / محظور'],['offline','لا يستجيب / خطأ'],['pending','لم يُفحص'],['viaproxy','تعمل عبر VPN'],['soon7','ينتهي ≤ 7 أيام'],['soon30','ينتهي ≤ 30 يوماً'],['chmatch','📺 يحتوي القنوات المطلوبة'],['adult','🔞 يحتوي محتوى للكبار']];
 const ORDER = {active:0,active_m3u:1,expired:2,blocked:3,invalid:4,offline:5,error:6,checking:7,pending:8};
 let rows = [], seq = 0, stop = false, running = false, filter = 'all', renderQueued = false;
 let SET = {per_domain:2, ffmpeg_path:'', ext_player:'auto', ext_player_path:'', ext_direct:false, updates:true, auto_hours:0, deep_default:false, count_default:false, timeout:15, conc:8};
@@ -2798,7 +2840,8 @@ function cellHtml(c, r, i){
     case 'host': {
       const di = dupInfo[r.id];
       const dupBadge = di ? `<span class="dup" title="سيرفر مكرر بمستخدمين مختلفين (${di.count} مرات)">🔁${di.count}</span>${di.best?'<span class="best" title="الأطول صلاحية بين المكرر">⭐</span>':''}` : '';
-      const via = (r.viaProxy ? `<span class="viap" title="يعمل عبر VPN فقط">🛡️ VPN</span>` : '') + (r.ua ? `<span class="viap" title="هوية مخصصة: ${esc(r.ua)}">🪪</span>` : '');
+      const adb = (r.adult && r.adult.adult) ? `<span class="adb" title="يحتوي محتوى للكبار:\n${esc(r.adult.hits.slice(0,10).join('\n'))}">🔞</span>` : '';
+      const via = adb + (r.viaProxy ? `<span class="viap" title="يعمل عبر VPN فقط">🛡️ VPN</span>` : '') + (r.ua ? `<span class="viap" title="هوية مخصصة: ${esc(r.ua)}">🪪</span>` : '');
       const t = r.type || 'xtream';
       const ts = `<select class="typesel" title="نوع السيرفر — غيّره ثم أعد الفحص">${TYPES.map(([v,l])=>`<option value="${v}" ${v===t?'selected':''}>${l}</option>`).join('')}</select>`;
       return `<td class="ltr hostcell">${ts}${via}${dupBadge}<input type="text" class="datain ltr" data-id="${r.id}" data-f="host" value="${esc(r.host)}" title="عنوان السيرفر — عدّله ثم أعد الفحص 🔁"></td>`;
@@ -2913,6 +2956,7 @@ function baseList(){
     if(filter==='all') return true;
     if(filter==='viaproxy') return !!r.viaProxy;
     if(filter==='chmatch') return !!(r.chs && r.chs.count>0);
+    if(filter==='adult') return !!(r.adult && r.adult.adult);
     if(filter==='soon7' || filter==='soon30'){ const n = filter==='soon7' ? 7 : 30; return grp(r.state)==='ok' && !r.unlimited && r.days_left!=null && r.days_left>=0 && r.days_left<=n; }
     return grp(r.state)===filter;
   };
@@ -2931,11 +2975,12 @@ function sortList(list){
 }
 const selected = () => rows.filter(r => r.sel);
 function renderStats(){
-  const c = {all:rows.length, ok:0, expired:0, bad:0, offline:0, pending:0, viaproxy:0, soon7:0, soon30:0, chmatch:0};
-  rows.forEach(r => { c[grp(r.state)]++; if(r.viaProxy) c.viaproxy++; if(r.chs && r.chs.count>0) c.chmatch++;
+  const c = {all:rows.length, ok:0, expired:0, bad:0, offline:0, pending:0, viaproxy:0, soon7:0, soon30:0, chmatch:0, adult:0};
+  rows.forEach(r => { c[grp(r.state)]++; if(r.viaProxy) c.viaproxy++; if(r.chs && r.chs.count>0) c.chmatch++; if(r.adult && r.adult.adult) c.adult++;
     if(grp(r.state)==='ok' && !r.unlimited && r.days_left!=null && r.days_left>=0){ if(r.days_left<=7) c.soon7++; if(r.days_left<=30) c.soon30++; } });
-  const col = {ok:'var(--ok)',expired:'var(--warn)',bad:'var(--bad)',offline:'var(--off)',pending:'var(--mute)',all:'var(--text)',viaproxy:'#6ee7b7',soon7:'var(--warn)',soon30:'var(--warn)',chmatch:'#fbbf24'};
-  $('#stats').innerHTML = FILTERS.filter(([k]) => k!=='chmatch' || hasCh()).map(([k,l]) => `<div class="stat ${filter===k?'sel':''}" data-f="${k}"><b style="color:${col[k]}">${c[k]}</b><span class="small">${l}</span></div>`).join('');
+  const col = {ok:'var(--ok)',expired:'var(--warn)',bad:'var(--bad)',offline:'var(--off)',pending:'var(--mute)',all:'var(--text)',viaproxy:'#6ee7b7',soon7:'var(--warn)',soon30:'var(--warn)',chmatch:'#fbbf24',adult:'#f87171'};
+  const anyAdult = rows.some(r => r.adult && r.adult.adult);
+  $('#stats').innerHTML = FILTERS.filter(([k]) => (k!=='chmatch' || hasCh()) && (k!=='adult' || anyAdult)).map(([k,l]) => `<div class="stat ${filter===k?'sel':''}" data-f="${k}"><b style="color:${col[k]}">${c[k]}</b><span class="small">${l}</span></div>`).join('');
   const n = selected().length;
   $('#bulk').classList.toggle('on', n>0); $('#bulkN').textContent = n;
 }
@@ -3033,7 +3078,14 @@ async function checkOne(r, timeout, count, deep){
     if(!deep) Object.assign(r, keepQ);
   } catch(e){ r.state = 'error'; r.message = 'تعذر الاتصال بالأداة: ' + e.message; }
   if(deep && grp(r.state)==='ok' && (r.type||'xtream')==='xtream') await deepOne(r, timeout);
+  if(grp(r.state)==='ok' && SET.adult_scan!==false) await adultOne(r, timeout);
   touch(r);
+}
+async function adultOne(r, timeout){
+  try{
+    const a = await api('/api/adult', checkPayload(r, {timeout: Math.max(15, timeout||15)}));
+    if(!a.error) r.adult = {adult: !!a.adult, hits: a.hits||[]};
+  }catch(e){}
 }
 async function deepOne(r, timeout){
   r.deepBusy = true; touch(r);
@@ -3217,7 +3269,7 @@ $('#bkClear').onclick = () => { rows.forEach(r => r.sel=false); render(); };
 
 // ---------------- حفظ/استيراد المشروع ----------------
 const PROJ_FIELDS = ['host','username','password','type','portal','mac','isFull','m3uurl','rawM3u','m3uKind','title','userState','portalType','exportedId','autoRefresh','state','status','exp_ts','exp_date','days_left',
-  'unlimited','active_cons','max_cons','trial','created','channels','ping_ms','server_tz','message','m3u','viaProxy','proxyUsed','note','quality','kbps','deepMsg','ua'];
+  'unlimited','active_cons','max_cons','trial','created','channels','ping_ms','server_tz','message','m3u','viaProxy','proxyUsed','note','quality','kbps','deepMsg','ua','adult'];
 function exportProject(){
   if(!rows.length) return toast('لا توجد سيرفرات لحفظها');
   const payload = {app:'IPTV_Checker', format:1, exported_at:new Date().toISOString(), count:rows.length,
@@ -4198,6 +4250,7 @@ async function openDetails(r){
   const base = [cell('الحالة', esc((ST[r.state]||ST.error)[0])), cell('الانتهاء', esc(r.exp_date || (r.unlimited?'غير محدود':''))), cell('الأيام المتبقية', r.unlimited?'∞':(r.days_left ?? '')),
     cell('الاتصالات', (r.max_cons!=null||r.active_cons!=null) ? `${r.active_cons ?? '?'} / ${r.max_cons ?? '?'}` : ''), cell('تاريخ الإنشاء', esc(r.created||'')), cell('تجريبي', r.trial==null?'':(r.trial?'نعم':'لا')),
     cell('الاستجابة', r.ping_ms!=null ? r.ping_ms+' ms':''), cell('التقييم', scoreOf(r) ?? ''), cell('عدد القنوات', tnum(r.channels)), cell('المنطقة الزمنية', esc(r.server_tz||'')),
+    cell('محتوى للكبار', r.adult ? (r.adult.adult ? '🔞 نعم — ' + esc(r.adult.hits.slice(0,6).join('، ')) : 'لا') : 'لم يُفحص'),
     cell('العنوان الفعلي', esc(r.base||'')), cell('ملاحظة العنوان', esc(r.scheme_note||''))].join('');
   const hist = (r.hist||[]).slice().reverse().map(h => `<tr><td>${new Date(h.t*1000).toLocaleString()}</td><td>${esc((ST[h.s]||ST.error)[0])}</td><td>${h.e?new Date(h.e*1000).toLocaleDateString():'—'}</td><td>${h.ms!=null?h.ms+' ms':'—'}</td></tr>`).join('');
   const deep = r.deepRes ? `<h4>الفحص العميق: <span class="b ${(QL[r.quality]||[])[1]||''}">${(QL[r.quality]||['—'])[0]}</span> <span class="small">${esc(r.deepMsg||'')}</span></h4><table class="tbl2"><tr><th>القناة</th><th>نجح</th><th>TTFB</th><th>kbps</th><th>ملاحظة</th></tr>${(r.deepRes.samples||[]).map(s => `<tr><td>${esc(s.name||'')}</td><td>${s.ok?'✅':'❌'}</td><td>${s.ttfb!=null?s.ttfb+' ms':'—'}</td><td>${s.kbps ?? '—'}</td><td>${esc(s.why||'')}</td></tr>`).join('')}</table>` : '';
@@ -4268,7 +4321,7 @@ async function loadSettings(){
 }
 function fillSettings(){
   $('#sTmo').value = SET.timeout; $('#sConc').value = SET.conc; $('#sDom').value = SET.per_domain; $('#sAuto').value = SET.auto_hours;
-  $('#sDeep').checked = !!SET.deep_default; $('#sCount').checked = !!SET.count_default; $('#sUpd').checked = SET.updates!==false;
+  $('#sDeep').checked = !!SET.deep_default; $('#sCount').checked = !!SET.count_default; $('#sAdult').checked = SET.adult_scan!==false; $('#sUpd').checked = SET.updates!==false;
   $('#sPlayer').value = SET.ext_player || 'auto'; $('#sPlayerPath').value = SET.ext_player_path || ''; $('#sDirect').checked = !!SET.ext_direct; $('#sFfmpeg').value = SET.ffmpeg_path || '';
   const f = (n,p) => `${n}: ${p ? '✅' : '—'}`;
   $('#sCaps').textContent = `الأدوات المكتشفة — ${f('ffmpeg',CAPS.ffmpeg)} | ${f('VLC',CAPS.vlc)} | ${f('mpv',CAPS.mpv)}${CAPS.iina!==undefined&&CAPS.platform==='darwin'?' | '+f('IINA',CAPS.iina):''}${CAPS.platform&&CAPS.platform.startsWith('win')?' | '+f('PotPlayer',CAPS.potplayer):''}`;
@@ -4279,7 +4332,7 @@ $('#stClose').onclick = () => closeOv('#st');
 $('#sUpdNow').onclick = () => { closeOv('#st'); checkUpdate(true); };
 $('#sSave').onclick = async () => {
   const d = {timeout:+$('#sTmo').value||15, conc:+$('#sConc').value||8, per_domain:+$('#sDom').value||2, auto_hours:+$('#sAuto').value||0,
-    deep_default:$('#sDeep').checked, count_default:$('#sCount').checked, updates:$('#sUpd').checked, ext_player:$('#sPlayer').value,
+    deep_default:$('#sDeep').checked, count_default:$('#sCount').checked, adult_scan:$('#sAdult').checked, updates:$('#sUpd').checked, ext_player:$('#sPlayer').value,
     ext_player_path:$('#sPlayerPath').value.trim(), ext_direct:$('#sDirect').checked, ffmpeg_path:$('#sFfmpeg').value.trim()};
   try{ const r = await api('/api/settings', {op:'set', data:d}); SET = Object.assign(SET, r.settings||d); CAPS = r.caps||CAPS; }catch(e){ return toast('تعذر الحفظ'); }
   $('#tmo').value = SET.timeout; $('#conc').value = SET.conc; closeOv('#st'); toast('تم حفظ الإعدادات');
@@ -4732,6 +4785,11 @@ class Handler(BaseHTTPRequestHandler):
                 return {'ok': True, 'via': launch_external(url, st.get('ext_player', 'auto'), st.get('ext_player_path', ''))}
             except Exception as e:
                 return {'ok': False, 'reason': str(e)[:160]}
+        if path == '/api/adult':
+            typ = data.get('type') or 'xtream'
+            hk = data.get('portal') if typ == 'stalker' else (data.get('url') if typ == 'm3u' else data.get('host'))
+            with _dom_sem(hk):
+                return adult_scan(data, max(5, min(120, int(data.get('timeout') or 20))))
         if path == '/api/chsearch':
             typ = data.get('type') or 'xtream'
             hk = data.get('portal') if typ == 'stalker' else (data.get('url') if typ == 'm3u' else data.get('host'))
