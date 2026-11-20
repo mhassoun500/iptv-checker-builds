@@ -32,7 +32,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-VERSION = "6.8"
+VERSION = "6.9"
 UA = "VLC/3.0.20 LibVLC/3.0.20"
 DEFAULT_TIMEOUT = 15
 
@@ -2633,7 +2633,7 @@ body.nfs #pvVideo{width:100vw;height:100vh;max-height:100vh;border-radius:0}
 .score{font-weight:700}
 .ordin{width:38px;padding:2px 3px;text-align:center;font-size:12px;margin-inline-start:3px;background:#0a0e12;border:1px solid var(--line);border-radius:5px;color:var(--text)}
 .ordin:focus{border-color:var(--acc);outline:none}
-.adb{display:inline-block;background:#4c1414;color:#fecaca;border:1px solid #991b1b;border-radius:6px;padding:0 4px;font-size:11px;margin-inline-end:3px;cursor:help}
+.adb{cursor:pointer;display:inline-block;background:#4c1414;color:#fecaca;border:1px solid #991b1b;border-radius:6px;padding:0 4px;font-size:11px;margin-inline-end:3px;cursor:help}
 .tagb{display:inline-block;background:#2a2147;color:#c4b5fd;border-radius:6px;padding:0 5px;font-size:11px;margin-inline-start:4px}
 .menu{position:absolute;z-index:40;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 10px;display:none;min-width:180px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
 .menu.on{display:block}
@@ -2806,6 +2806,7 @@ http://example.com:8080/live/USER/PASS/12345.ts"></textarea>
     <button class="sec" id="bkM3u">📃 ملف M3U</button>
     <button class="sec" id="bkLinks">📋 نسخ الروابط</button>
     <button class="sec" id="bkUa">🪪 هوية المشغّل</button>
+    <button class="sec" id="bkUnAdult">🔞 إزالة علامة الكبار</button>
     <button class="danger" id="bkDel">🗑 حذف المحدد</button>
     <button class="sec" id="bkClear">إلغاء التحديد</button>
   </div>
@@ -2853,6 +2854,7 @@ http://example.com:8080/live/USER/PASS/12345.ts"></textarea>
           <button class="tab" data-k="fav">⭐</button>
           <button class="tab" data-k="recent">🕘</button>
           <button class="tab" data-k="all" title="بحث شامل في القنوات والأفلام والمسلسلات">🔎 الكل</button>
+          <button class="tab" data-k="res" title="نتائج البحث في محتوى السيرفرات">📋 النتائج</button>
         </div>
         <button class="sec" id="pvBack" style="display:none">↪ رجوع لقائمة المسلسلات</button>
         <div class="row2"><input type="search" id="pvQ" placeholder="ابحث..."><button class="sec" id="pvRefresh" title="إعادة جلب القوائم من السيرفر">🔄</button></div>
@@ -3063,7 +3065,7 @@ function cellHtml(c, r, i){
     case 'host': {
       const di = dupInfo[r.id];
       const dupBadge = di ? `<span class="dup" title="سيرفر مكرر بمستخدمين مختلفين (${di.count} مرات)">🔁${di.count}</span>${di.best?'<span class="best" title="الأطول صلاحية بين المكرر">⭐</span>':''}` : '';
-      const adb = (r.adult && r.adult.adult) ? `<span class="adb" title="يحتوي محتوى للكبار:\n${esc(r.adult.hits.slice(0,10).join('\n'))}">🔞</span>` : '';
+      const adb = (r.adult && r.adult.adult) ? `<span class="adb" data-act="unadult" title="يحتوي محتوى للكبار:\n${esc(r.adult.hits.slice(0,10).join('\n'))}\n\n(اضغط لإزالة العلامة إن كان التصنيف خاطئاً)">🔞</span>` : '';
       const via = adb + (r.viaProxy ? `<span class="viap" title="يعمل عبر VPN فقط">🛡️ VPN</span>` : '') + (r.ua ? `<span class="viap" title="هوية مخصصة: ${esc(r.ua)}">🪪</span>` : '');
       const t = r.type || 'xtream';
       const ts = `<select class="typesel" title="نوع السيرفر — غيّره ثم أعد الفحص">${TYPES.map(([v,l])=>`<option value="${v}" ${v===t?'selected':''}>${l}</option>`).join('')}</select>`;
@@ -3321,6 +3323,7 @@ async function checkOne(r, timeout, count, deep){
 async function adultOne(r, timeout){
   try{
     const a = await api('/api/adult', checkPayload(r, {timeout: Math.max(15, timeout||15)}));
+    if(r.adult && r.adult.manual) return;               // المستخدم أزال العلامة يدوياً — لا تُعِدها
     if(!a.error) r.adult = {adult: !!a.adult, hits: a.hits||[]};
   }catch(e){}
 }
@@ -3758,9 +3761,9 @@ let pv = null, pvTimers = {};
 const sk = () => key(pv.r);
 const kindOf = it => (it && it.kind) || (pv.view==='episodes' ? 'series' : (pv.tab==='fav'||pv.tab==='recent') ? 'live' : pv.tab);
 const itemKey = it => it.ou || it.cmd || (kindOf(it)+':'+it.id);
-const tabKinds = () => (pv.type==='xtream') ? ['live','vod','series','fav','recent','all'] : ['live','fav','recent'];
+const tabKinds = () => ((pv.type==='xtream') ? ['live','vod','series','fav','recent','all'] : ['live','fav','recent']).concat(pv.results ? ['res'] : []);
 const jnorm = t => String(t||'').toLowerCase().replace(/[أإآ]/g,'ا').replace(/ة/g,'ه').replace(/ى/g,'ي').replace(/[^0-9a-z\u0621-\u064a]+/g,'');
-const isFolder = it => pv.view==='list' && (pv.tab==='series' || (pv.tab==='all' && it.kind==='series'));
+const isFolder = it => pv.view==='list' && (pv.tab==='series' || ((pv.tab==='all' || pv.tab==='res') && it.kind==='series'));
 
 async function regSrv(r){
   const t = r.type||'xtream';
@@ -3853,12 +3856,13 @@ async function ensureLoaded(k){
   }catch(e){ pvMsg('تعذّر تحميل هذا القسم.'); }
 }
 function tabLabels(){
-  const base = {live:'📺 مباشر',vod:'🎬 أفلام',series:'📂 مسلسلات',fav:'⭐',recent:'🕘',all:'🔎 الكل'};
+  const base = {live:'📺 مباشر',vod:'🎬 أفلام',series:'📂 مسلسلات',fav:'⭐',recent:'🕘',all:'🔎 الكل',res:'📋 النتائج'};
   const kinds = tabKinds();
   [...$('#pvTabs').children].forEach(b => {
     const k = b.dataset.k; b.style.display = kinds.includes(k) ? '' : 'none';
     let n = ''; if(pv && pv.data && pv.data[k] && pv.data[k].loaded) n = ` (${pv.data[k].items.length})`;
     if(k==='fav') n = ` (${(UI.favs[sk()]||[]).length})`;
+    if(k==='res') n = ` (${(pv && pv.results || []).length})`;
     b.textContent = base[k] + n;
   });
 }
@@ -3867,7 +3871,7 @@ function tabLabels(){
 async function openPlayer(r, keep){
   pvStop();
   const t = r.type||'xtream';
-  pv = {r, type:t, sid:'', tab:'live', view:'list', curSeries:null, episodes:[], cur:null, list:[], data:null, player:null, hls:null,
+  pv = {r, type:t, sid:'', results:(keep && keep.results) ? keep.results.map(m => Object.assign({}, m, {kind:m.kind||'live'})) : null, tab:'live', view:'list', curSeries:null, episodes:[], cur:null, list:[], data:null, player:null, hls:null,
         tries:0, att:0, started:false, txTried:false, forceTx:false, mode:''};
   keep = keep || {};
   $('#pvHost').textContent = (r.title || defaultName(r.host)) + (r.username ? ' — ' + r.username : '');
@@ -3889,7 +3893,7 @@ async function openPlayer(r, keep){
   clearInterval(tmr);
   if(!pv || pv!==me) return;
   if(!pv.data) pv.data = {live:{cats:{},items:[],loaded:true}, vod:{cats:{},items:[],loaded:false}, series:{cats:{},items:[],loaded:false}};
-  try{ tabLabels(); await switchTab('live', keep); }
+  try{ tabLabels(); await switchTab(pv.results ? 'res' : 'live', keep); }
   catch(e){ pvMsg('تعذّر عرض القائمة: ' + (e && e.message || e) + ' — اضغط 🔄'); return; }
   const nL = pv.data.live.items.length;
   const cnote = pv.cachedAt ? ` (من الذاكرة المحفوظة — ${new Date(pv.cachedAt*1000).toLocaleString()}، اضغط 🔄 للتحديث)` : '';
@@ -3899,7 +3903,7 @@ function fillCats(keepName){
   const sel = $('#pvCat');
   const cats = (pv.data && pv.data[pv.tab] && pv.data[pv.tab].cats) || {};
   sel.innerHTML = '<option value="">كل التصنيفات</option>' + Object.entries(cats).map(([id,n])=>`<option value="${esc(id)}">${esc(n||id)}</option>`).join('');
-  sel.style.display = (pv.tab==='fav'||pv.tab==='recent'||pv.tab==='all'||pv.view==='episodes') ? 'none' : '';
+  sel.style.display = (pv.tab==='fav'||pv.tab==='recent'||pv.tab==='all'||pv.tab==='res'||pv.view==='episodes') ? 'none' : '';
   if(keepName){ const o = [...sel.options].find(o => o.textContent===keepName); if(o) sel.value = o.value; }
 }
 async function switchTab(k, keep){
@@ -3927,6 +3931,19 @@ function buildList(){
   const q = $('#pvQ').value.trim().toLowerCase(), cat = $('#pvCat').value;
   const qn = jnorm(q);
   let out = [];
+  if(pv.tab==='res' && pv.view==='list'){                 // نتائج البحث في الجدول — كلها معاً
+    const groups = {live:[], vod:[], series:[]};
+    (pv.results||[]).forEach(c => { if(!qn || jnorm(c.name).includes(qn)) (groups[c.kind] || groups.live).push(c); });
+    for(const [k, lbl] of [['live','📺 القنوات'],['vod','🎬 الأفلام'],['series','📂 المسلسلات']]){
+      if(!groups[k].length) continue;
+      out.push({h:true, text:`${lbl} (${groups[k].length})`});
+      groups[k].forEach(c => out.push({it:c}));
+    }
+    pv.list = out;
+    $('#pvSp').style.height = (out.length*RH)+'px';
+    $('#pvEmpty').textContent = out.length ? '' : 'لا يوجد شيء مطابق.';
+    drawVirtual(); return;
+  }
   if(pv.tab==='all' && pv.view==='list'){                 // بحث شامل: مباشر + أفلام + مسلسلات
     if(qn.length >= 2){
       for(const [k, lbl] of [['live','📺 القنوات'],['vod','🎬 الأفلام'],['series','📂 المسلسلات']]){
@@ -3966,7 +3983,7 @@ function drawVirtual(){
     const e = pv.list[i];
     if(e.h){ html += `<div class="ch hdr" style="top:${i*RH}px">${esc(e.text)}</div>`; continue; }
     const it = e.it, folder = isFolder(it), sel = pv.cur && itemKey(pv.cur)===itemKey(it) && kindOf(pv.cur)===kindOf(it) && !folder;
-    const pre = pv.tab==='all' && pv.view==='list' ? (KI[it.kind]||'') : (folder ? '📂 ' : '');
+    const pre = (pv.tab==='all' || pv.tab==='res') && pv.view==='list' ? (KI[it.kind]||'') : (folder ? '📂 ' : '');
     html += `<div class="ch ${sel?'sel':''}" style="top:${i*RH}px" data-i="${i}">${it.icon?`<img loading="lazy" src="${esc(it.icon)}" onerror="this.remove()" alt="">`:''}<span class="tx">${pre}${it.num&&pv.view==='episodes'?esc(it.num)+'. ':''}${esc(it.name)}</span>${isFav(it)?'<span class="rt">★</span>':''}${it.rating?`<span class="rt">${esc(it.rating)}</span>`:''}</div>`;
   }
   $('#pvSp').innerHTML = html;
@@ -4196,7 +4213,7 @@ function statsTick(){
 $('#pvSt').onclick = () => { const e = $('#pvStats'); e.classList.toggle('on'); clearInterval(statsTick.t); if(e.classList.contains('on')){ statsTick(); statsTick.t = setInterval(statsTick, 1000); } };
 
 $('#pvTabs').onclick = e => { const t = e.target.closest('.tab'); if(t && pv) switchTab(t.dataset.k); };
-$('#pvBack').onclick = () => { pv.view='list'; pv.curSeries=null; $('#pvBack').style.display='none'; fillCats(); $('#pvQ').value = pv.tab==='all' ? (pv.allQ||'') : ''; $('#pvInfo').innerHTML=''; buildList(); pvMsg(pv.tab==='all' ? 'نتائج البحث الشامل.' : 'اختر مسلسلاً.'); };
+$('#pvBack').onclick = () => { pv.view='list'; pv.curSeries=null; $('#pvBack').style.display='none'; fillCats(); $('#pvQ').value = (pv.tab==='all'||pv.tab==='res') ? (pv.allQ||'') : ''; $('#pvInfo').innerHTML=''; buildList(); pvMsg(pv.tab==='all' ? 'نتائج البحث الشامل.' : 'اختر مسلسلاً.'); };
 $('#pvClose').onclick = pvClose;
 $('#ov').onclick = e => { if(e.target===$('#ov')) pvClose(); };
 $('#pvQ').oninput = () => { if(pv){ $('#pvChs').scrollTop = 0; buildList(); } };
@@ -4321,22 +4338,13 @@ $('#chmQ').oninput = drawChm;
 $('#chmClose').onclick = () => closeOv('#chm');
 $('#chmList').onclick = async e => {
   const b = e.target.closest('[data-i]'); if(!b || !chmRow) return;
-  const m = chmRow.chs.matches[+b.dataset.i]; closeOv('#chm');
-  const kind = m.kind || 'live';
-  await openPlayer(chmRow, {q: kind==='live' ? m.name : ''});
+  const all = chmRow.chs.matches || [], m = all[+b.dataset.i]; closeOv('#chm');
+  await openPlayer(chmRow, {results: all, q: ''});      // كل نتائج البحث تُحمَّل في المشغّل معاً
   if(!pv) return;
-  if(kind !== 'live'){
-    await switchTab(kind); if(!pv) return;
-    $('#pvQ').value = m.name; buildList();
-    const items = (pv.data[kind] && pv.data[kind].items) || [];
-    const it = items.find(c => String(c.id)===String(m.id)) || items.find(c => c.name===m.name);
-    if(!it) return pvMsg('لم أجد العنصر في القائمة — اختره من القائمة.');
-    const idx = pv.list.findIndex(e => e.it && String(e.it.id)===String(it.id));
-    if(idx >= 0) onItemClick(idx); else if(kind==='vod') playItem(it);
-    return;
-  }
-  const it = (pv.data.live.items||[]).find(c => (m.cmd && c.cmd===m.cmd) || (m.ou && c.ou===m.ou) || (m.id!=null && !m.cmd && !m.ou && String(c.id)===String(m.id))) || (pv.data.live.items||[]).find(c => c.name===m.name);
-  if(it) playItem(it); else pvMsg('لم أجد القناة في القائمة — اخترها من القائمة.');
+  const same = it => (it.kind||'live')===(m.kind||'live') && ((m.cmd && it.cmd===m.cmd) || (m.ou && it.ou===m.ou) || (!m.cmd && !m.ou && String(it.id)===String(m.id)));
+  const idx = pv.list.findIndex(e => e.it && same(e.it));
+  if(idx >= 0){ const box = $('#pvChs'); box.scrollTop = Math.max(0, idx*RH - box.clientHeight/2); onItemClick(idx); }
+  toast((pv.results||[]).length + ' نتيجة في تبويب «📋 النتائج» — اختر أي واحدة للتبديل');
 };
 
 
@@ -4384,6 +4392,15 @@ $('#uaSave').onclick = () => {
   if($('#uaRecheck').checked) runChecks(uaRows.slice());
 };
 $('#bkUa').onclick = () => openUa(selected());
+// إزالة علامة 🔞 يدوياً (تبقى محفوظة ولا تعود مع إعادة الفحص)
+function unAdult(list, noConfirm){
+  list = list.filter(r => r.adult && r.adult.adult);
+  if(!list.length) return toast('لا توجد علامة 🔞 على السيرفرات المحددة');
+  if(!noConfirm && !confirm(list.length > 1 ? `إزالة علامة 🔞 من ${list.length} سيرفرات؟` : 'إزالة علامة 🔞 من هذا السيرفر؟\n(لن تعود عند إعادة الفحص — يمكن إعادتها من نافذة التفاصيل)')) return;
+  list.forEach(r => { r.adult = {adult:false, hits:[], manual:true}; });
+  render(); toast(`تمت إزالة العلامة من ${list.length} سيرفر`);
+}
+$('#bkUnAdult').onclick = () => unAdult(selected());
 async function detectUa(r, stream){
   return api('/api/ua_detect', checkPayload(r, {stream: stream!==false, timeout: 10}));
 }
@@ -4415,6 +4432,8 @@ $('#uaDetect').onclick = async () => {
 $('#tb').onclick = async e => {
   const cb = e.target.closest('.rsel');
   if(cb){ const r = rows.find(x => x.id === +cb.closest('tr').dataset.id); if(r){ r.sel = cb.checked; renderStats(); } return; }
+  const ub = e.target.closest('[data-act=unadult]');
+  if(ub){ const r = rows.find(x => x.id === +ub.closest('tr').dataset.id); if(r) unAdult([r]); return; }
   const b = e.target.closest('button'); if(!b) return;
   const id = +b.closest('tr').dataset.id; const r = rows.find(x => x.id===id); if(!r) return;
   const a = b.dataset.act;
@@ -4581,7 +4600,9 @@ async function openDetails(r){
   const base = [cell('الحالة', esc((ST[r.state]||ST.error)[0])), cell('الانتهاء', esc(r.exp_date || (r.unlimited?'غير محدود':''))), cell('الأيام المتبقية', r.unlimited?'∞':(r.days_left ?? '')),
     cell('الاتصالات', (r.max_cons!=null||r.active_cons!=null) ? `${r.active_cons ?? '?'} / ${r.max_cons ?? '?'}` : ''), cell('تاريخ الإنشاء', esc(r.created||'')), cell('تجريبي', r.trial==null?'':(r.trial?'نعم':'لا')),
     cell('الاستجابة', r.ping_ms!=null ? r.ping_ms+' ms':''), cell('التقييم', scoreOf(r) ?? ''), cell('عدد القنوات', tnum(r.channels)), cell('المنطقة الزمنية', esc(r.server_tz||'')),
-    cell('محتوى للكبار', r.adult ? (r.adult.adult ? '🔞 نعم — ' + esc(r.adult.hits.slice(0,6).join('، ')) : 'لا') : 'لم يُفحص'),
+    cell('محتوى للكبار', (r.adult ? (r.adult.adult ? '🔞 نعم — ' + esc(r.adult.hits.slice(0,6).join('، ')) : (r.adult.manual ? 'لا (أُزيلت العلامة يدوياً)' : 'لا')) : 'لم يُفحص') +
+      (r.adult && r.adult.adult ? ' <button class="sec" id="dtUnAdult" style="padding:2px 8px;font-size:12px">إزالة العلامة</button>' : '') +
+      (r.adult && r.adult.manual ? ' <button class="sec" id="dtReAdult" style="padding:2px 8px;font-size:12px">إعادة الفحص التلقائي</button>' : '')),
     cell('العنوان الفعلي', esc(r.base||'')), cell('ملاحظة العنوان', esc(r.scheme_note||''))].join('');
   const hist = (r.hist||[]).slice().reverse().map(h => `<tr><td>${new Date(h.t*1000).toLocaleString()}</td><td>${esc((ST[h.s]||ST.error)[0])}</td><td>${h.e?new Date(h.e*1000).toLocaleDateString():'—'}</td><td>${h.ms!=null?h.ms+' ms':'—'}</td></tr>`).join('');
   const deep = r.deepRes ? `<h4>الفحص العميق: <span class="b ${(QL[r.quality]||[])[1]||''}">${(QL[r.quality]||['—'])[0]}</span> <span class="small">${esc(r.deepMsg||'')}</span></h4><table class="tbl2"><tr><th>القناة</th><th>نجح</th><th>TTFB</th><th>kbps</th><th>ملاحظة</th></tr>${(r.deepRes.samples||[]).map(s => `<tr><td>${esc(s.name||'')}</td><td>${s.ok?'✅':'❌'}</td><td>${s.ttfb!=null?s.ttfb+' ms':'—'}</td><td>${s.kbps ?? '—'}</td><td>${esc(s.why||'')}</td></tr>`).join('')}</table>` : '';
@@ -4589,6 +4610,8 @@ async function openDetails(r){
     ${hist ? `<h4>سجل الفحوص</h4><table class="tbl2"><tr><th>الوقت</th><th>الحالة</th><th>الانتهاء</th><th>الاستجابة</th></tr>${hist}</table>` : ''}
     <div class="row" style="margin-top:12px"><button id="dtDeep" class="sec">⚡ فحص بث فعلي الآن</button><button id="dtUa" class="sec">🪪 هوية المشغّل: ${esc(uaName(r.ua))}</button></div>`;
   $('#dtUa').onclick = () => openUa([r]);
+  const ua1 = $('#dtUnAdult'); if(ua1) ua1.onclick = () => { unAdult([r], true); openDetails(r); };
+  const ua2 = $('#dtReAdult'); if(ua2) ua2.onclick = async () => { delete r.adult; ua2.disabled = true; await adultOne(r, 20); render(); openDetails(r); };
   $('#dtDeep').disabled = t!=='xtream' || grp(r.state)!=='ok';
   $('#dtDeep').onclick = async () => { $('#dtDeep').disabled = true; await deepOne(r, 20); touch(r); openDetails(r); };
   if(t!=='xtream'){ $('#dtExtra').textContent = ''; return; }
