@@ -137,8 +137,8 @@ jobs:
           P="dist/Mo IPTV Checker.app/Contents/Info.plist"
           /usr/libexec/PlistBuddy -c "Delete :CFBundleDisplayName" "$P" 2>/dev/null || true
           /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Mo IPTV Checker" "$P"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $V" "$P"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $V" "$P"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $V" "$P" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $V" "$P"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $V" "$P" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $V" "$P"
           codesign --force --deep --sign - "dist/Mo IPTV Checker.app" 
 
       - name: Build .dmg (macOS)
