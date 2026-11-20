@@ -314,3 +314,33 @@ class TestV66(Base):
             self.assertEqual(ic._find_tool('ffmpeg'), fake)
         finally:
             ic._DATA_DIR = old
+
+
+class TestVodResolve(Base):
+    def test_resolve_real_extension(self):
+        import http.server
+        hits = []
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_GET(s):
+                hits.append(s.path)
+                if s.path.endswith('/movie/u/p/7.mkv'):
+                    s.send_response(206); s.send_header('Content-Type', 'video/x-matroska'); s.end_headers()
+                    s.wfile.write(b'\x1aE\xdf\xa3' + b'\0' * 5000)
+                elif '/movie/' in s.path:
+                    s.send_response(401); s.end_headers()
+                else:
+                    b = json.dumps({'info': {}, 'movie_data': {'container_extension': 'mkv'}}).encode()
+                    s.send_response(200); s.send_header('Content-Type', 'application/json'); s.end_headers(); s.wfile.write(b)
+
+            def log_message(s, *a):
+                pass
+        srv = ic.ThreadingHTTPServer(('127.0.0.1', 0), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            h = f'http://127.0.0.1:{srv.server_address[1]}'
+            r = self.post('/api/vod_resolve', dict(host=h, username='u', password='p', vod_id=7, ext='mp4'))
+            self.assertEqual(r['ext'], 'mkv')
+            self.assertEqual(r['tried'][0]['ext'], 'mkv')        # الامتداد من get_vod_info يُجرَّب أولاً
+        finally:
+            srv.shutdown()

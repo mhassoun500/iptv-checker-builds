@@ -32,7 +32,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-VERSION = "6.7"
+VERSION = "6.8"
 UA = "VLC/3.0.20 LibVLC/3.0.20"
 DEFAULT_TIMEOUT = 15
 
@@ -1081,9 +1081,46 @@ def get_vod_info(host, user, pw, vod_id, timeout=DEFAULT_TIMEOUT, opener=None):
                        'duration': i.get('duration') or '', 'rating': i.get('rating') or '', 'genre': i.get('genre') or '',
                        'year': str(i.get('releasedate') or i.get('release_date') or '')[:4],
                        'cast': i.get('cast') or i.get('actors') or '', 'director': i.get('director') or ''}
+        md = (j.get('movie_data') if isinstance(j, dict) else None) or {}
+        if isinstance(md, dict) and md.get('container_extension'):
+            out['ext'] = str(md.get('container_extension')).lstrip('.').lower()
     except Exception as e:
         out['error'] = _net_reason(e)
     return out
+
+
+def vod_resolve(d, vod_id, exts, timeout=12, kind='vod'):
+    """بعض السيرفرات ترفض الفيلم إن طُلب بامتداد غير امتداده الحقيقي (فتظهر 401/404):
+    يجرّب الامتدادات واحداً تلو الآخر بطلب صغير ويرجع أول امتداد يعطي بثاً فعلياً."""
+    host = str(d.get('host') or '').rstrip('/')
+    op = _opener_for(str(d.get('proxy') or ''))
+    tried = []
+    seen = set()
+    for ext in exts:
+        ext = str(ext or '').lstrip('.').lower()
+        if not ext or ext in seen:
+            continue
+        seen.add(ext)
+        url = _direct_url(host, d.get('username', ''), d.get('password', ''), vod_id, ext, 'series' if kind == 'series' else 'vod')
+        row = {'ext': ext, 'status': None, 'ok': False}
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': _cur_ua() or UA, 'Range': 'bytes=0-8191',
+                                                       'Accept': '*/*', 'Connection': 'close'})
+            with op.open(req, timeout=timeout) as r:
+                row['status'] = r.status
+                ctype = (r.headers.get('Content-Type') or '').lower()
+                head = r.read(4096)
+                row['ok'] = r.status in (200, 206) and 'text/html' not in ctype and len(head) > 0 \
+                    and not head.lstrip().startswith((b'<', b'{'))
+        except urllib.error.HTTPError as e:
+            row['status'] = e.code
+        except Exception as e:
+            row['status'] = _net_reason(e)[:60]
+        tried.append(row)
+        if row['ok']:
+            return {'ext': ext, 'tried': tried}
+        time.sleep(0.6)                                    # لا تفتح اتصالين معاً
+    return {'ext': '', 'tried': tried}
 
 
 def get_epg(host, user, pw, stream_id, timeout=DEFAULT_TIMEOUT, opener=None):
@@ -4013,7 +4050,16 @@ async function startAttempt(it){
   v.onplaying = () => { pv.started = true; pv.tries = 0; clearTimeout(pvTimers.start); pvMsg('يعمل: '+(it.name||'')); };
   v.onerror = () => {
     if(pv && pv.mode==='vod-direct' && !pv.started){ pv.noDirect = true; pvStop(); return startAttempt(it); }   // فشل المباشر — عبر الوسيط
-    const c = v.error && v.error.code; if(c===3 || c===4) onDecodeFail(it, att, url); else onFail(it, 'error'); };
+    const c = v.error && v.error.code;
+    if((c===3 || c===4) && !live && !pv.started && !pv.forceTx){          // قبل اعتبارها مشكلة ترميز: هل رفض السيرفر الملف أصلاً؟
+      fetch(url+'&probe=1').then(r => r.json()).then(d => {
+        if(!pv || pv.cur!==it) return;
+        if(d && (d.status===200 || d.status===206) && d.kind!=='html') onDecodeFail(it, att, url);
+        else onFail(it, 'http:'+(d && d.status));
+      }).catch(() => onFail(it, 'error'));
+      return;
+    }
+    if(c===3 || c===4) onDecodeFail(it, att, url); else onFail(it, 'error'); };
   v.onended = () => { if(live) onFail(it, 'ended'); };
   v.onloadedmetadata = () => { if(!live) resumeTo(it); };
   v.ontimeupdate = () => { if(!live) saveResume(it); };
@@ -4094,6 +4140,20 @@ async function onFail(it, why){
   pvStop();
   await new Promise(res => setTimeout(res, 1200));          // لا تفحص قبل أن يغلق السيرفر الاتصال السابق
   if(!pv || pv.cur!==it) return;
+  if(!live && pv.type==='xtream' && !it._resolved){          // فيلم/حلقة: ابحث عن الامتداد الحقيقي للملف
+    it._resolved = true;
+    pvMsg('السيرفر رفض الملف — جاري البحث عن الصيغة الصحيحة للملف...');
+    try{
+      const rr = await api('/api/vod_resolve', {host:pv.r.host, username:pv.r.username, password:pv.r.password, vod_id:it.id, ext:it.ext||'', kind:kindOf(it), proxy:proxyOf(pv.r), ua:pv.r.ua||''});
+      if(!pv || pv.cur!==it) return;
+      try{ api('/api/log', {op:'add', msg:`بحث الامتداد لـ «${it.name}»: ` + (rr.tried||[]).map(t => t.ext+'='+t.status).join('، ')}); }catch(e){}
+      if(rr.ext && rr.ext !== (it.ext||'')){
+        it.ext = rr.ext; pv.att = 0; pv.started = false; pv.noDirect = false; pv.txTried = false; pv.forceTx = false;
+        pvMsg('وُجدت الصيغة الصحيحة (' + rr.ext + ') — جاري التشغيل...'); return startAttempt(it);
+      }
+      if(!rr.ext){ pvMsg('السيرفر يرفض هذا الملف بكل الصيغ (' + (rr.tried||[]).map(t => t.ext+': '+t.status).slice(0,4).join('، ') + ') — الملف معطّل على السيرفر أو غير مسموح لحسابك.'); return; }
+    }catch(e){}
+  }
   const url = surl(it, atts[0].ext); let d = null;
   try{ const r = await fetch(url+'&probe=1'); d = await r.json(); }catch(e){}
   if(!pv || pv.cur!==it) return;
@@ -4967,6 +5027,13 @@ class Handler(BaseHTTPRequestHandler):
                                bool(data.get('force')), lambda r: bool(r.get('items')))
         if path == '/api/series':
             return get_series_info(sget('host'), sget('username'), sget('password'), data.get('series_id'), opener=op_)
+        if path == '/api/vod_resolve':
+            kind = 'series' if data.get('kind') == 'series' else 'vod'
+            info = get_vod_info(sget('host'), sget('username'), sget('password'), data.get('vod_id'), opener=op_) \
+                if kind == 'vod' else {}
+            exts = [info.get('ext'), data.get('ext')] + ['mkv', 'mp4', 'avi', 'm4v', 'mov', 'ts', 'flv', 'wmv']
+            with _dom_sem(sget('host')):
+                return vod_resolve(data, data.get('vod_id'), exts, kind=kind)
         if path == '/api/vodinfo':
             return get_vod_info(sget('host'), sget('username'), sget('password'), data.get('vod_id'), opener=op_)
         if path == '/api/epg':
