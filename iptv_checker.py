@@ -32,7 +32,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-VERSION = "6.6"
+VERSION = "6.7"
 UA = "VLC/3.0.20 LibVLC/3.0.20"
 DEFAULT_TIMEOUT = 15
 
@@ -145,7 +145,7 @@ def save_cfg(d):
 
 DEFAULT_SETTINGS = {'per_domain': 2, 'ffmpeg_path': '', 'ext_player': 'auto', 'ext_player_path': '',
                     'ext_direct': False, 'updates': True, 'auto_hours': 0, 'deep_default': False,
-                    'count_default': False, 'timeout': 15, 'conc': 8, 'adult_scan': True, 'ua_auto': True}
+                    'count_default': False, 'timeout': 15, 'conc': 8, 'adult_scan': True, 'ua_auto': True, 'window_engine': 'auto'}
 
 
 def get_settings():
@@ -2894,6 +2894,12 @@ http://example.com:8080/live/USER/PASS/12345.ts"></textarea>
       <div class="fld"><label>المشغّل الخارجي</label><select id="sPlayer"><option value="auto">تلقائي (VLC ثم الافتراضي)</option><option value="vlc">VLC</option><option value="mpv">mpv</option><option value="iina">IINA (ماك)</option><option value="potplayer">PotPlayer (ويندوز)</option><option value="custom">مسار مخصص</option></select></div>
       <div class="fld"><label>مسار المشغّل المخصص</label><input type="text" id="sPlayerPath" class="ltr"></div>
     </div>
+    <div class="fld"><label>محرك نافذة البرنامج (يُطبَّق عند إعادة فتح البرنامج)</label><select id="sEngine">
+      <option value="auto">تلقائي (نافذة مستقلة إن توفرت، وإلا كروم)</option>
+      <option value="webview">نافذة مستقلة — محرك سفاري على ماك / إيدج على ويندوز</option>
+      <option value="chrome">نافذة كروم / إيدج (تدعم ملفات MKV أكثر، أيقونتها أيقونة كروم)</option>
+      <option value="browser">المتصفح العادي (تبويب في متصفحك الافتراضي)</option>
+    </select></div>
     <label class="opt"><input type="checkbox" id="sDirect"> أرسل الرابط المباشر للسيرفر للمشغّل الخارجي (بدل الوسيط المحلي) عند عدم استخدام VPN</label>
     <div class="fld"><label>مسار ffmpeg (اختياري — يُكتشف تلقائياً)</label><input type="text" id="sFfmpeg" class="ltr" placeholder="/opt/homebrew/bin/ffmpeg"></div>
     <div class="hint" id="sCaps"></div>
@@ -4016,7 +4022,16 @@ async function startAttempt(it){
     if(!pv || pv.cur!==it) return;
     if(!v.paused && pv.started){ if(Math.abs(v.currentTime-lastT)<0.01) still++; else still = 0; lastT = v.currentTime; if(live && still>=12){ still = 0; onFail(it, 'stall'); } }
   }, 1000);
-  clearTimeout(pvTimers.start); pvTimers.start = setTimeout(() => { if(pv && pv.cur===it && !pv.started) onFail(it, 'timeout'); }, live ? 12000 : 20000);
+  clearTimeout(pvTimers.start);
+  const direct = !live && pv.type==='xtream' && !proxyOf(pv.r) && !pv.r.ua && !pv.noDirect && !pv.forceTx;
+  let extended = false;
+  const onTimeout = () => {
+    if(!(pv && pv.cur===it && !pv.started)) return;
+    const gotData = v.readyState >= 2 || (v.buffered && v.buffered.length) || (pv.player && pv.player.statisticsInfo && pv.player.statisticsInfo.speed > 0);
+    if(gotData && !extended){ extended = true; pvTimers.start = setTimeout(onTimeout, 15000); return; }   // البيانات تصل — امنحه وقتاً إضافياً
+    onFail(it, 'timeout');
+  };
+  pvTimers.start = setTimeout(onTimeout, direct ? 9000 : 25000);
   pvMsg((pv.tries ? `إعادة الاتصال (${pv.tries}/3): ` : 'جاري التشغيل: ') + (it.name||''));
   try{
     if(pv.forceTx){ await playTranscode(it, url); return; }
@@ -4031,11 +4046,11 @@ async function startAttempt(it){
 async function playTs(v, url, live, it){
   await ensureMpegts();
   if(!(window.mpegts && mpegts.isSupported())){ v.src = url; try{ await v.play(); }catch(e){} return; }
-  pv.player = mpegts.createPlayer({type:'mpegts', isLive:live, url}, {enableWorker:false, enableStashBuffer:true, stashInitialSize:128, lazyLoad:false, liveBufferLatencyChasing:false, autoCleanupSourceBuffer:true});
+  pv.player = mpegts.createPlayer({type:'mpegts', isLive:live, url}, {enableWorker:false, enableStashBuffer:true, stashInitialSize:384, liveBufferLatencyChasing:false, autoCleanupSourceBuffer:true});
   pv.player.attachMediaElement(v); pv.player.load();
   pv.player.on(mpegts.Events.ERROR, (type, detail, info) => {
     if(!pv || pv.cur!==it) return;
-    if(type==='MediaError') onDecodeFail(it, {}, url); else onFail(it, 'net:'+(detail||''));
+    if(type==='MediaError' && !pv.started) onDecodeFail(it, {}, url); else onFail(it, pv.started ? 'stall' : 'net:'+(detail||''));
   });
   try{ v.playbackRate = 1.0; await v.play(); }catch(e){}
 }
@@ -4062,22 +4077,28 @@ async function playTranscode(it, url){
 async function onDecodeFail(it, att, url){
   if(!pv || pv.cur!==it || pv.txTried) { if(pv && pv.cur===it) pvMsg('الترميز غير مدعوم داخل الأداة — استخدم «فتح خارجياً».'); return; }
   if(!CAPS.ffmpeg){ pvMsg('الترميز غير مدعوم (HEVC/AC3...). ثبّت ffmpeg لتفعيل التحويل اللحظي، أو استخدم «فتح خارجياً».'); return; }
-  pv.txTried = true; pv.forceTx = true; pvStop(); startAttempt(it);
+  pv.txTried = true; pv.forceTx = true; pvStop(); pvMsg('صيغة غير مدعومة — جاري التحويل عبر ffmpeg...');
+  pvTimers.re = setTimeout(() => { if(pv && pv.cur===it) startAttempt(it); }, 1200);
 }
 async function onFail(it, why){
   if(!pv || pv.cur!==it) return;
   clearTimeout(pvTimers.start);
   const live = kindOf(it)==='live', atts = attemptsOf(it);
-  if(!pv.started && pv.att+1 < atts.length){ pv.att++; pvStop(); return startAttempt(it); }       // جرّب الصيغة التالية
+  const again = (ms) => { pvStop(); pvTimers.re = setTimeout(() => { if(pv && pv.cur===it) startAttempt(it); }, ms); };
+  if(pv.mode==='vod-direct' && !pv.started){ pv.noDirect = true; pvMsg('جاري التشغيل عبر الوسيط المحلي...'); return again(300); }
+  if(!pv.started && pv.att+1 < atts.length){ pv.att++; pvMsg('جاري تجربة صيغة بديلة...'); return again(1200); }   // انتظر تحرير الاتصال ثم جرّب الصيغة التالية
   if(live && pv.tries < 3 && (pv.started || why==='stall' || why==='ended')){          // إعادة اتصال تلقائية
     pv.tries++; const w = [1500,3000,6000][pv.tries-1]; pvStop(); pvMsg(`انقطع البث — إعادة الاتصال (${pv.tries}/3)...`);
     pvTimers.re = setTimeout(() => { if(pv && pv.cur===it){ pv.started = false; pv.att = 0; startAttempt(it); } }, w); return;
   }
   pvStop();
+  await new Promise(res => setTimeout(res, 1200));          // لا تفحص قبل أن يغلق السيرفر الاتصال السابق
+  if(!pv || pv.cur!==it) return;
   const url = surl(it, atts[0].ext); let d = null;
   try{ const r = await fetch(url+'&probe=1'); d = await r.json(); }catch(e){}
   if(!pv || pv.cur!==it) return;
   pvMsg(diagMsg(d) + ' جرّب «فتح خارجياً» أو زر «تحويل».');
+  try{ api('/api/log', {op:'add', msg:`فشل التشغيل [${kindOf(it)}] «${it.name}» — السبب: ${why}، الوضع: ${pv.mode}، الفحص: ${d ? (d.status||'')+' '+(d.kind||'')+' '+(d.msg||'') : 'لا رد'}`}); }catch(e){}
 }
 function diagMsg(d){
   if(!d) return 'تعذّر الوصول إلى السيرفر.';
@@ -4571,7 +4592,7 @@ async function loadSettings(){
 }
 function fillSettings(){
   $('#sTmo').value = SET.timeout; $('#sConc').value = SET.conc; $('#sDom').value = SET.per_domain; $('#sAuto').value = SET.auto_hours;
-  $('#sDeep').checked = !!SET.deep_default; $('#sCount').checked = !!SET.count_default; $('#sAdult').checked = SET.adult_scan!==false; $('#sUaAuto').checked = SET.ua_auto!==false; $('#sUpd').checked = SET.updates!==false;
+  $('#sDeep').checked = !!SET.deep_default; $('#sCount').checked = !!SET.count_default; $('#sAdult').checked = SET.adult_scan!==false; $('#sEngine').value = SET.window_engine || 'auto'; $('#sUaAuto').checked = SET.ua_auto!==false; $('#sUpd').checked = SET.updates!==false;
   $('#sPlayer').value = SET.ext_player || 'auto'; $('#sPlayerPath').value = SET.ext_player_path || ''; $('#sDirect').checked = !!SET.ext_direct; $('#sFfmpeg').value = SET.ffmpeg_path || '';
   const f = (n,p) => `${n}: ${p ? '✅' : '—'}`;
   $('#sCaps').textContent = `الأدوات المكتشفة — ${f('ffmpeg',CAPS.ffmpeg)} | ${f('VLC',CAPS.vlc)} | ${f('mpv',CAPS.mpv)}${CAPS.iina!==undefined&&CAPS.platform==='darwin'?' | '+f('IINA',CAPS.iina):''}${CAPS.platform&&CAPS.platform.startsWith('win')?' | '+f('PotPlayer',CAPS.potplayer):''}`;
@@ -4582,7 +4603,7 @@ $('#stClose').onclick = () => closeOv('#st');
 $('#sUpdNow').onclick = () => { closeOv('#st'); checkUpdate(true); };
 $('#sSave').onclick = async () => {
   const d = {timeout:+$('#sTmo').value||15, conc:+$('#sConc').value||8, per_domain:+$('#sDom').value||2, auto_hours:+$('#sAuto').value||0,
-    deep_default:$('#sDeep').checked, count_default:$('#sCount').checked, adult_scan:$('#sAdult').checked, ua_auto:$('#sUaAuto').checked, updates:$('#sUpd').checked, ext_player:$('#sPlayer').value,
+    deep_default:$('#sDeep').checked, count_default:$('#sCount').checked, adult_scan:$('#sAdult').checked, window_engine:$('#sEngine').value, ua_auto:$('#sUaAuto').checked, updates:$('#sUpd').checked, ext_player:$('#sPlayer').value,
     ext_player_path:$('#sPlayerPath').value.trim(), ext_direct:$('#sDirect').checked, ffmpeg_path:$('#sFfmpeg').value.trim()};
   try{ const r = await api('/api/settings', {op:'set', data:d}); SET = Object.assign(SET, r.settings||d); CAPS = r.caps||CAPS; }catch(e){ return toast('تعذر الحفظ'); }
   $('#tmo').value = SET.timeout; $('#conc').value = SET.conc; closeOv('#st'); toast('تم حفظ الإعدادات');
@@ -4974,6 +4995,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/log':
             if data.get('op') == 'clear':
                 _LOG.clear()
+            if data.get('op') == 'add':                      # أحداث المشغّل من الواجهة (للتشخيص)
+                log_event('player', str(data.get('msg') or '')[:300])
+                return {'ok': True}
             return {'items': list(_LOG)}
         if path == '/api/update_check':
             if data.get('force'):
@@ -5142,12 +5166,20 @@ def main():
     # وضع المتصفح: افتح في المتصفح الافتراضي مباشرة (--browser)
     force_browser = '--browser' in sys.argv or '-b' in sys.argv
     # نافذة أصلية بوضع «التطبيق» من كروم/إيدج (محرك Chromium) — إغلاقها يُنهي البرنامج
-    # 1) نافذة مستقلة حقيقية (pywebview) — تُستخدم في نسخة ماك المبنية
-    if not force_browser and os.environ.get('MOIPTV_NO_WEBVIEW') != '1' and _open_webview(url):
-        return
-    # 2) نافذة كروم/إيدج بوضع التطبيق
-    if not force_browser and _open_chrome_app(url):
-        return
+    # محرك النافذة من الإعدادات: auto / webview (سفاري المستقلة) / chrome / browser
+    try:
+        eng = str(get_settings().get('window_engine') or 'auto')
+    except Exception:
+        eng = 'auto'
+    if force_browser:
+        eng = 'browser'
+    order = {'webview': ['webview', 'chrome'], 'chrome': ['chrome', 'webview'], 'browser': [],
+             'auto': ['webview', 'chrome']}.get(eng, ['webview', 'chrome'])
+    for e in order:
+        if e == 'webview' and os.environ.get('MOIPTV_NO_WEBVIEW') != '1' and _open_webview(url):
+            return
+        if e == 'chrome' and _open_chrome_app(url):
+            return
 
     # المتصفح الافتراضي (الوضع العادي أو كبديل احتياطي)
     threading.Timer(0.6, lambda: webbrowser.open(url)).start()
