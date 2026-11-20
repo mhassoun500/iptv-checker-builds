@@ -44,6 +44,14 @@ jobs:
       # ============================================================
       # Windows: portable .exe  +  Setup.exe installer (Inno Setup)
       # ============================================================
+      - name: Get ffmpeg (Windows + macOS)
+        if: matrix.label != 'linux'
+        shell: bash
+        run: |
+          python -m pip install imageio-ffmpeg
+          SRC=$(python -c "import imageio_ffmpeg;print(imageio_ffmpeg.get_ffmpeg_exe())")
+          if [ "${{ matrix.label }}" = "windows" ]; then cp "$SRC" ffmpeg.exe; ./ffmpeg.exe -version | head -1; else cp "$SRC" ffmpeg; chmod +x ffmpeg; ./ffmpeg -version | head -1; fi
+
       - name: Build (Windows)
         if: matrix.label == 'windows'
         run: pyinstaller --onefile --windowed --noconfirm --name "Mo IPTV Checker" --icon app.ico iptv_checker.py
@@ -83,6 +91,7 @@ jobs:
 
           [Files]
           Source: "dist\\Mo IPTV Checker.exe"; DestDir: "{app}"; Flags: ignoreversion
+          Source: "ffmpeg.exe"; DestDir: "{app}"; Flags: ignoreversion
 
           [Icons]
           Name: "{group}\\Mo IPTV Checker"; Filename: "{app}\\{#AppExe}"
@@ -108,6 +117,8 @@ jobs:
           mkdir out
           cp "dist/Mo IPTV Checker.exe" "out/Mo IPTV Checker-windows.exe"
           cp "installer_out/Mo IPTV Checker Setup.exe" "out/Mo IPTV Checker Setup.exe"
+          mkdir -p portable && cp "dist/Mo IPTV Checker.exe" portable/ && cp ffmpeg.exe portable/
+          (cd portable && 7z a -tzip "../out/Mo IPTV Checker-windows-portable.zip" "Mo IPTV Checker.exe" ffmpeg.exe >/dev/null)
 
       # ============================================================
       # macOS: .app bundle  +  .dmg installer
@@ -138,7 +149,7 @@ jobs:
         if: matrix.label == 'macos'
         run: |
           pyinstaller --windowed --noconfirm --name "Mo IPTV Checker" --icon app.icns \
-            --osx-bundle-identifier com.mhassoun500.moiptvchecker --collect-submodules webview iptv_checker.py
+            --osx-bundle-identifier com.mhassoun500.moiptvchecker --collect-submodules webview --add-binary "ffmpeg:." iptv_checker.py
           V=$(python -c "import re;print(re.search(r'VERSION\\s*=\\s*\"([^\"]+)\"',open('iptv_checker.py',encoding='utf-8').read()).group(1))")
           P="dist/Mo IPTV Checker.app/Contents/Info.plist"
           /usr/libexec/PlistBuddy -c "Delete :CFBundleDisplayName" "$P" 2>/dev/null || true
@@ -156,6 +167,7 @@ jobs:
           sleep 12
           curl -s -o /dev/null -w "server HTTP %{http_code}\n" http://127.0.0.1:8765/ || echo "server not reachable"
           ps -p $PID >/dev/null && echo "app still running (window open)" || echo "app exited"
+          find "dist/Mo IPTV Checker.app" -name ffmpeg -type f -perm +111 | head -3
           kill $PID 2>/dev/null || true
           cat smoke.log | tail -20
 

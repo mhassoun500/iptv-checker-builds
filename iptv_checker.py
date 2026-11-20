@@ -32,7 +32,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-VERSION = "6.5"
+VERSION = "6.6"
 UA = "VLC/3.0.20 LibVLC/3.0.20"
 DEFAULT_TIMEOUT = 15
 
@@ -145,7 +145,7 @@ def save_cfg(d):
 
 DEFAULT_SETTINGS = {'per_domain': 2, 'ffmpeg_path': '', 'ext_player': 'auto', 'ext_player_path': '',
                     'ext_direct': False, 'updates': True, 'auto_hours': 0, 'deep_default': False,
-                    'count_default': False, 'timeout': 15, 'conc': 8, 'adult_scan': True}
+                    'count_default': False, 'timeout': 15, 'conc': 8, 'adult_scan': True, 'ua_auto': True}
 
 
 def get_settings():
@@ -675,6 +675,7 @@ def check(host, user, pw, timeout=DEFAULT_TIMEOUT, count_channels=False, proxy='
             r['m3u'] = f"{host}/get.php?{qs}&type=m3u_plus&output=ts"
             r['scheme_note'] = 'يعمل عبر ' + used.split(':', 1)[0].upper()
     except urllib.error.HTTPError as e:
+        r['http_code'] = e.code
         return _m3u_fallback(r, timeout, prev=f'player_api: {_http_reason(e.code)}', opener=op)
     except Exception as e:
         r['state'] = 'offline'
@@ -699,6 +700,7 @@ def check(host, user, pw, timeout=DEFAULT_TIMEOUT, count_channels=False, proxy='
             except Exception:
                 pass
         return r
+    r['http_code'] = 'nojson'
     return _m3u_fallback(r, timeout, opener=op)
 
 
@@ -988,6 +990,37 @@ def get_streams(host, user, pw, kind, timeout=DEFAULT_TIMEOUT, opener=None):
     except Exception as e:
         out['error'] = _net_reason(e)
     return out
+
+
+_LCACHE_TTL = 12 * 3600
+
+
+def _lcache_path(key):
+    import hashlib
+    d = os.path.join(_DATA_DIR, 'cache')
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, hashlib.sha1(key.encode('utf-8')).hexdigest()[:20] + '.json')
+
+
+def cached_list(key, fetch, force=False, ok=lambda r: True):
+    """يحفظ قوائم السيرفر (القنوات/الأفلام/المسلسلات) على القرص لتفتح فوراً في المرة التالية."""
+    path = _lcache_path(key)
+    if not force:
+        try:
+            if time.time() - os.path.getmtime(path) < _LCACHE_TTL:
+                with open(path, encoding='utf-8') as f:
+                    r = json.load(f)
+                r['cached_at'] = int(os.path.getmtime(path))
+                return r
+        except Exception:
+            pass
+    r = fetch()
+    if ok(r):
+        try:
+            _write_json(path, r)
+        except Exception:
+            pass
+    return r
 
 
 def get_content(host, user, pw, timeout=DEFAULT_TIMEOUT, opener=None):
@@ -1753,27 +1786,54 @@ def _channel_list(d, timeout=25, force=False):
     return items
 
 
-def channel_search(d, terms, verify=False, timeout=25, force=False):
+def _vod_list(d, kind, timeout=30, force=False):
+    """قائمة الأفلام أو المسلسلات (Xtream) مع أسماء التصنيفات — تشارك ذاكرة القرص مع المشغّل."""
+    host = str(d.get('host') or '').rstrip('/')
+    op = _opener_for(str(d.get('proxy') or ''))
+    k = 'streams|' + kind + '|' + hist_key('xtream', d) + '|' + _cur_ua()
+    r = cached_list(k, lambda: get_streams(host, d.get('username', ''), d.get('password', ''), kind, timeout, op),
+                    force, lambda x: bool(x.get('items')))
+    if r.get('error') and not r.get('items'):
+        raise RuntimeError(r['error'])
+    qs = urllib.parse.urlencode({'username': d.get('username', ''), 'password': d.get('password', '')})
+    cats = _cats(host, qs, 'get_vod_categories' if kind == 'vod' else 'get_series_categories', timeout, op)
+    return [dict(x, cat=cats.get(str(x.get('cat')), '')) for x in r.get('items') or []]
+
+
+def channel_search(d, terms, verify=False, timeout=25, force=False, kinds=('live',)):
     terms = [t for t in (_norm(x) for x in terms) if len(t) >= 2]
-    out = {'count': 0, 'total': 0, 'matches': [], 'verified': None, 'error': ''}
+    out = {'count': 0, 'total': 0, 'matches': [], 'verified': None, 'error': '', 'by': {}}
     if not terms:
         out['error'] = 'اكتب كلمة بحث من حرفين على الأقل'
         return out
-    try:
-        items = _channel_list(d, timeout, force)
-    except Exception as e:
-        out['error'] = 'تعذّر جلب القنوات: ' + (str(e) if isinstance(e, RuntimeError) else _net_reason(e))[:150]
+    typ = d.get('type') or 'xtream'
+    kinds = [k for k in kinds if k in ('live', 'vod', 'series')] or ['live']
+    if typ != 'xtream':
+        kinds = ['live']                                 # الأفلام والمسلسلات متاحة في Xtream فقط
+    hits, errs = [], []
+    for kind in kinds:
+        try:
+            items = _channel_list(d, timeout, force) if kind == 'live' else _vod_list(d, kind, max(timeout, 30), force)
+        except Exception as e:
+            errs.append((str(e) if isinstance(e, RuntimeError) else _net_reason(e))[:150])
+            continue
+        out['total'] += len(items)
+        n_k = 0
+        for it in items:
+            n, c = _norm(it.get('name')), _norm(it.get('cat'))
+            if any(t in n or t in c for t in terms):
+                hits.append(dict(it, kind=kind))
+                n_k += 1
+        out['by'][kind] = n_k
+    if errs and not out['total']:
+        out['error'] = 'تعذّر جلب المحتوى: ' + errs[0]
         return out
-    out['total'] = len(items)
-    hits = []
-    for it in items:
-        n, c = _norm(it.get('name')), _norm(it.get('cat'))
-        if any(t in n or t in c for t in terms):
-            hits.append(it)
     out['count'] = len(hits)
-    out['matches'] = [{k: v for k, v in h.items() if k in ('name', 'cat', 'id', 'ext', 'cmd', 'ou', 'icon')}
-                      for h in hits[:300]]
-    if verify and hits:
+    out['matches'] = [{k: v for k, v in h.items() if k in ('name', 'cat', 'id', 'ext', 'cmd', 'ou', 'icon', 'kind')}
+                      for h in hits[:400]]
+    vhits = [h for h in hits if h.get('kind') == 'live'] or [h for h in hits if h.get('kind') == 'vod']
+    if verify and vhits:
+        hits = vhits
         typ = d.get('type') or 'xtream'
         proxy = str(d.get('proxy') or '')
         op = _opener_for(proxy)
@@ -1787,8 +1847,9 @@ def channel_search(d, terms, verify=False, timeout=25, force=False):
                 elif typ == 'm3u':
                     url = h.get('ou')
                 else:
+                    vk = h.get('kind') == 'vod'
                     url = _direct_url(str(d.get('host')).rstrip('/'), d.get('username', ''), d.get('password', ''),
-                                      h.get('id'), 'ts', 'live')
+                                      h.get('id'), (h.get('ext') or 'mp4') if vk else 'ts', 'vod' if vk else 'live')
                 r = _probe_sample(url, op, 15)
             except Exception as e:
                 r = {'ok': False, 'why': str(e)[:120]}
@@ -1838,6 +1899,76 @@ def adult_scan(d, timeout=20):
     out['adult'] = bool(out['hits'])
     out['hits'] = out['hits'][:30]
     return out
+
+
+# ---------------- اكتشاف هوية المشغّل المناسبة للسيرفر ----------------
+UA_PRESETS = [
+    ('VLC', 'VLC/3.0.20 LibVLC/3.0.20'),
+    ('IPTV Smarters Pro', 'IPTVSmartersPro'),
+    ('TiviMate', 'TiviMate/4.7.0 (Android 11)'),
+    ('OTT Navigator', 'OTT Navigator/1.6.9.4 (Linux;Android 11)'),
+    ('Kodi', 'Kodi/20.2 (Windows NT 10.0; Win64; x64) App_Bitness/64 Version/20.2'),
+    ('MAG', 'Mozilla/5.0 (QtEmbedded; U; Linux; C) AppleWebKit/533.3 (KHTML, like Gecko) MAG200 stbapp ver: 2 rev: 250 Safari/533.3'),
+    ('okhttp', 'okhttp/4.9.0'),
+    ('Chrome', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'),
+]
+
+
+def ua_detect(d, timeout=10, stream=True):
+    """يجرّب كل هوية على السيرفر: هل يقبل الحساب؟ وهل يبث فعلاً؟ ويقترح الأنسب."""
+    typ = d.get('type') or 'xtream'
+    proxy = str(d.get('proxy') or '')
+    op = _opener_for(proxy)
+    res = []
+    sid = None
+    host = str(d.get('host') or '').rstrip('/')
+    qs = urllib.parse.urlencode({'username': d.get('username', ''), 'password': d.get('password', '')})
+    for name, ua in UA_PRESETS:
+        row = {'name': name, 'ua': ua, 'api': False, 'stream': None, 'why': ''}
+        _TL.ua = ua
+        try:
+            if typ == 'stalker':
+                _st_token(d.get('portal') or d.get('host'), str(d.get('mac') or d.get('username') or '').upper(),
+                          proxy, timeout, force=True)
+                row['api'] = True
+            elif typ == 'm3u':
+                _, b, _ = _get(d.get('url') or d.get('host'), timeout, 65536, op, ua)
+                row['api'] = b'#EXT' in b[:2000] or b'http' in b[:4000]
+                if not row['api']:
+                    row['why'] = 'الرد ليس قائمة M3U'
+            else:
+                _, b, _ = _get(f'{host}/player_api.php?{qs}', timeout, 2_000_000, op, ua)
+                j = json.loads(b.decode('utf-8', 'replace') or 'null')
+                ui = j.get('user_info') if isinstance(j, dict) else None
+                row['api'] = isinstance(ui, dict) and str(ui.get('auth', 1)) != '0'
+                if not row['api']:
+                    row['why'] = 'رفض الحساب'
+                elif stream:
+                    if sid is None:
+                        try:
+                            arr = _xt(host, qs, 'get_live_streams', max(timeout, 20), 60_000_000, op)
+                            sid = next((c.get('stream_id') for c in arr if isinstance(c, dict) and c.get('stream_id')), '') \
+                                if isinstance(arr, list) else ''
+                        except Exception:
+                            sid = ''
+                    if sid:
+                        pr = _probe_sample(_direct_url(host, d.get('username', ''), d.get('password', ''), sid, 'ts', 'live'),
+                                           op, min(timeout, 12), read_secs=2.0, max_bytes=200_000)
+                        row['stream'] = bool(pr.get('ok'))
+                        if not pr.get('ok'):
+                            row['why'] = pr.get('why') or 'لا يبث'
+                        time.sleep(0.4)
+        except urllib.error.HTTPError as e:
+            row['why'] = _http_reason(e.code)
+        except Exception as e:
+            row['why'] = (str(e) if isinstance(e, RuntimeError) else _net_reason(e))[:100]
+        finally:
+            _TL.ua = ''
+        res.append(row)
+    best = next((r for r in res if r['api'] and r['stream']), None) or next((r for r in res if r['api']), None)
+    default_ok = bool(res and res[0]['api'] and res[0]['stream'] is not False)
+    return {'results': res, 'best': best['ua'] if best else '', 'best_name': best['name'] if best else '',
+            'default_ok': default_ok}
 
 
 
@@ -1898,6 +2029,22 @@ def stalker_link(portal, mac, cmd, proxy='', timeout=15):
 
 
 # ---------------- ffmpeg والمشغّلات الخارجية ----------------
+def _bundle_dirs():
+    """المجلدات التي قد يوجد فيها ffmpeg المدمج: بجانب البرنامج، داخل حزمة ماك، أو مجلد الاستخراج."""
+    ds = []
+    if getattr(sys, 'frozen', False):
+        ed = os.path.dirname(os.path.abspath(sys.executable))
+        ds += [ed, os.path.join(ed, 'ffmpeg'), os.path.join(ed, '..', 'Frameworks'), os.path.join(ed, '..', 'Resources'),
+               os.path.join(ed, '..', 'Frameworks', 'ffmpeg'), os.path.join(ed, '..', 'Resources', 'ffmpeg')]
+        mp = getattr(sys, '_MEIPASS', '')
+        if mp:
+            ds += [mp, os.path.join(mp, 'ffmpeg')]
+    else:
+        ds.append(os.path.dirname(os.path.abspath(__file__)))
+    ds.append(os.path.join(_DATA_DIR, 'bin'))
+    return ds
+
+
 def _find_tool(name, custom=''):
     if custom and os.path.exists(custom):
         d = os.path.dirname(custom)
@@ -1906,6 +2053,11 @@ def _find_tool(name, custom=''):
             return custom
         if os.path.exists(cand):
             return cand
+    exe = name + ('.exe' if sys.platform.startswith('win') else '')
+    for d in _bundle_dirs():                           # النسخة المدمجة مع البرنامج أولاً
+        c = os.path.join(d, exe)
+        if os.path.isfile(c):
+            return c
     p = shutil.which(name)
     if p:
         return p
@@ -1993,10 +2145,32 @@ def launch_external(url, player='auto', custom=''):
     return 'default'
 
 
+def _probe_with_ffmpeg(local_url):
+    ff = find_ffmpeg()
+    if not ff:
+        return {'ok': False, 'reason': 'ffmpeg غير موجود'}
+    try:
+        p = subprocess.run([ff, '-hide_banner', '-analyzeduration', '3000000', '-probesize', '3000000', '-i', local_url],
+                           capture_output=True, timeout=25)
+        txt = p.stderr.decode('utf-8', 'replace')
+        out = {'ok': True, 'video': '', 'audio': '', 'w': None, 'h': None}
+        mv = re.search(r'Stream #.*?Video:\s*([a-z0-9_]+).*?(\d{2,5})x(\d{2,5})', txt)
+        ma = re.search(r'Stream #.*?Audio:\s*([a-z0-9_]+)', txt)
+        if mv:
+            out['video'], out['w'], out['h'] = mv.group(1), int(mv.group(2)), int(mv.group(3))
+        if ma:
+            out['audio'] = ma.group(1)
+        if not out['video'] and not out['audio']:
+            return {'ok': False, 'reason': 'تعذّر قراءة البث'}
+        return out
+    except Exception as e:
+        return {'ok': False, 'reason': str(e)[:120]}
+
+
 def probe_codec(local_url):
     ff = find_ffprobe()
     if not ff:
-        return {'ok': False, 'reason': 'ffprobe غير موجود'}
+        return _probe_with_ffmpeg(local_url)
     try:
         p = subprocess.run([ff, '-v', 'error', '-analyzeduration', '4000000', '-probesize', '4000000',
                             '-show_entries', 'stream=codec_type,codec_name,width,height', '-of', 'json', local_url],
@@ -2549,10 +2723,13 @@ http://example.com:8080/live/USER/PASS/12345.ts"></textarea>
 
 <div class="card" style="margin-top:16px">
   <div id="chbox">
-    <b>📺 بحث في قنوات السيرفرات</b>
-    <input type="search" id="chq" placeholder="مثال: bein, بي ان سبورت, ssc — افصل بين الكلمات بفاصلة">
-    <label class="opt" title="يجرّب تشغيل قناة مطابقة فعلياً للتأكد أنها تبث"><input type="checkbox" id="chVerify"> تأكد من البث</label>
-    <button id="btnChSearch">🔎 ابحث في القنوات</button>
+    <b>🔎 بحث في محتوى السيرفرات</b>
+    <input type="search" id="chq" placeholder="مثال: bein, بي ان سبورت, Breaking Bad — افصل بين الكلمات بفاصلة">
+    <label class="opt"><input type="checkbox" id="chkLive" checked> 📺 قنوات</label>
+    <label class="opt"><input type="checkbox" id="chkVod" checked> 🎬 أفلام</label>
+    <label class="opt"><input type="checkbox" id="chkSeries" checked> 📂 مسلسلات</label>
+    <label class="opt" title="يجرّب تشغيل عنصر مطابق فعلياً للتأكد أنه يبث"><input type="checkbox" id="chVerify"> تأكد من البث</label>
+    <button id="btnChSearch">🔎 ابحث</button>
     <button class="sec" id="btnChClear" title="إزالة نتائج البحث في القنوات">✕ مسح</button>
     <span id="chSaved" style="display:flex;gap:6px;flex-wrap:wrap"></span>
   </div>
@@ -2669,6 +2846,8 @@ http://example.com:8080/live/USER/PASS/12345.ts"></textarea>
       <option value="__custom">مخصص...</option>
     </select></div>
     <div class="fld" id="uaCustomRow"><label>النص المخصص</label><input type="text" id="uaCustom" class="ltr" placeholder="MyPlayer/1.0"></div>
+    <div class="row" style="margin:6px 0"><button class="sec" id="uaDetect">🔎 اكتشف الهوية المناسبة تلقائياً</button><span class="small" id="uaDetMsg"></span></div>
+    <div id="uaRes"></div>
     <label class="opt"><input type="checkbox" id="uaRecheck" checked> أعد الفحص بعد الحفظ</label>
     <div class="row"><button id="uaSave">حفظ</button></div>
   </div>
@@ -2707,6 +2886,7 @@ http://example.com:8080/live/USER/PASS/12345.ts"></textarea>
     </div>
     <label class="opt"><input type="checkbox" id="sDeep"> تفعيل الفحص العميق افتراضياً</label>
     <label class="opt"><input type="checkbox" id="sCount"> تفعيل عدّ القنوات افتراضياً</label>
+    <label class="opt"><input type="checkbox" id="sUaAuto"> عند رفض السيرفر للاتصال: جرّب هويات مشغّل أخرى تلقائياً واحفظ الناجحة</label>
     <label class="opt"><input type="checkbox" id="sAdult"> تمييز السيرفرات التي تحتوي محتوى للكبار 🔞 (يفحص أسماء التصنيفات بعد كل فحص)</label>
     <label class="opt"><input type="checkbox" id="sUpd"> التحقق من وجود تحديثات عند التشغيل</label>
     <hr style="border-color:var(--line)">
@@ -2864,7 +3044,9 @@ function cellHtml(c, r, i){
       if(x.error) return `<td class="small" title="${esc(x.error)}" style="color:var(--off)">تعذّر</td>`;
       if(!x.count) return `<td class="small" title="من أصل ${x.total} قناة">لا يوجد</td>`;
       const v = x.verified, vb = !v ? '' : v.ok ? ' <span title="تم التأكد أن «'+esc(v.name)+'» تبث">✅</span>' : ' <span title="'+esc((v.name||'')+': '+(v.why||'لا تبث'))+'">⚠️</span>';
-      return `<td><button class="chbtn" data-act="chs" title="${esc((x.matches||[]).slice(0,8).map(m=>m.name).join('، '))}">📺 ${x.count}</button>${vb}</td>`;
+      const by = x.by || {live:x.count}, KI = {live:'📺', vod:'🎬', series:'📂'};
+      const lbl = ['live','vod','series'].filter(k => by[k]).map(k => KI[k] + ' ' + by[k]).join(' ') || ('📺 ' + x.count);
+      return `<td><button class="chbtn" data-act="chs" title="${esc((x.matches||[]).slice(0,8).map(m=>m.name).join('، '))}">${lbl}</button>${vb}</td>`;
     }
     case 'note': return `<td><input type="text" class="notein" data-id="${r.id}" value="${esc(r.note||'')}" placeholder="#وسم أو ملاحظة"></td>`;
     case 'msg': return `<td class="small note" title="${esc(r.message||'')}${r.scheme_note?' — '+esc(r.scheme_note):''}">${esc(r.message||'')}</td>`;
@@ -3078,6 +3260,18 @@ async function checkOne(r, timeout, count, deep){
     if(!deep) Object.assign(r, keepQ);
   } catch(e){ r.state = 'error'; r.message = 'تعذر الاتصال بالأداة: ' + e.message; }
   if(deep && grp(r.state)==='ok' && (r.type||'xtream')==='xtream') await deepOne(r, timeout);
+  if(grp(r.state)!=='ok' && r.http_code && !r.ua && SET.ua_auto!==false){   // رفض السيرفر — جرّب هويات أخرى
+    r.message = (r.message||'') + ' — جاري تجربة هويات مشغّل أخرى...'; touch(r);
+    try{
+      const d = await api('/api/ua_detect', checkPayload(r, {stream:false, timeout: Math.min(10, timeout||10)}));
+      if(d.best && !d.default_ok){
+        r.ua = d.best;
+        const out = await api('/api/check', checkPayload(r, {timeout, count}));
+        Object.assign(r, out);
+        if(grp(r.state)==='ok') r.message = 'يعمل بهوية ' + d.best_name + ' (اكتُشفت تلقائياً)'; else delete r.ua;
+      } else { r.message = String(r.message||'').replace(' — جاري تجربة هويات مشغّل أخرى...', ''); }
+    }catch(e){}
+  }
   if(grp(r.state)==='ok' && SET.adult_scan!==false) await adultOne(r, timeout);
   touch(r);
 }
@@ -3589,12 +3783,14 @@ async function loadContent(force){
   const data = {live:{cats:{},items:[],loaded:true}, vod:{cats:{},items:[],loaded:false}, series:{cats:{},items:[],loaded:false}};
   let err = '';
   if(pv.type==='xtream'){
-    const res = await api('/api/content', {host:r.host, username:r.username, password:r.password, proxy:proxyOf(r), ua:r.ua||''});
+    const res = await api('/api/content', {host:r.host, username:r.username, password:r.password, proxy:proxyOf(r), ua:r.ua||'', force:!!force});
+    pv.cachedAt = res.cached_at || 0;
     data.live = {cats:(res.live||{}).cats||{}, items:(res.live||{}).items||[], loaded:true};
     data.vod.cats = (res.vod||{}).cats||{}; data.series.cats = (res.series||{}).cats||{};
     err = res.error || '';
   } else if(pv.type==='stalker'){
-    const res = await api('/api/stalker', {portal:r.portal||r.host, mac:r.mac||r.username, proxy:proxyOf(r), ua:r.ua||''});
+    const res = await api('/api/stalker', {portal:r.portal||r.host, mac:r.mac||r.username, proxy:proxyOf(r), ua:r.ua||'', force:!!force});
+    pv.cachedAt = res.cached_at || 0;
     data.live = {cats:res.cats||{}, items:res.items||[], loaded:true}; err = res.error || '';
   } else {
     const resp = await fetch(`/relay?t=${window.__TOKEN__}&s=${pv.sid}&u=${encodeURIComponent(r.m3uurl||r.host)}`);
@@ -3608,7 +3804,7 @@ async function ensureLoaded(k){
   if(!pv.data[k] || pv.data[k].loaded || pv.type!=='xtream') return;
   pvMsg(k==='vod' ? 'جاري تحميل الأفلام (مرة واحدة)...' : 'جاري تحميل المسلسلات (مرة واحدة)...');
   try{
-    const res = await api('/api/streams', {host:pv.r.host, username:pv.r.username, password:pv.r.password, kind:k, proxy:proxyOf(pv.r), ua:pv.r.ua||''});
+    const res = await api('/api/streams', {host:pv.r.host, username:pv.r.username, password:pv.r.password, kind:k, proxy:proxyOf(pv.r), ua:pv.r.ua||'', force:!!pv.forceLists});
     pv.data[k].items = res.items || []; pv.data[k].loaded = true;
     pvMsg(res.error ? ('تعذّر التحميل: '+res.error) : `${pv.data[k].items.length} عنصر — اختر واحداً.`);
   }catch(e){ pvMsg('تعذّر تحميل هذا القسم.'); }
@@ -3648,7 +3844,8 @@ async function openPlayer(r, keep){
   tabLabels();
   await switchTab('live', keep);
   const nL = pv.data.live.items.length;
-  pvMsg(nL ? `جاهز — ${nL} قناة.${t==='xtream'?' الأفلام والمسلسلات تُحمَّل عند فتح قسمها.':''}` : (err ? ('تعذر جلب البث: '+err) : 'لا قنوات.'));
+  const cnote = pv.cachedAt ? ` (من الذاكرة المحفوظة — ${new Date(pv.cachedAt*1000).toLocaleString()}، اضغط 🔄 للتحديث)` : '';
+  pvMsg(nL ? `جاهز — ${nL} قناة.${t==='xtream'?' الأفلام والمسلسلات تُحمَّل عند فتح قسمها.':''}${cnote}` : (err ? ('تعذر جلب البث: '+err) : 'لا قنوات.'));
 }
 function fillCats(keepName){
   const sel = $('#pvCat');
@@ -3770,7 +3967,7 @@ async function playItem(it, opts){
   if(!pv) return;
   opts = opts || {};
   pvStop();
-  pv.cur = it; pv.tries = 0; pv.att = 0; pv.started = false; pv.txTried = false; pv.forceTx = !!opts.tx; pv.curIdx = pv.list.findIndex(e => e.it===it);
+  pv.cur = it; pv.tries = 0; pv.att = 0; pv.started = false; pv.txTried = false; pv.forceTx = !!opts.tx; pv.noDirect = false; pv.curIdx = pv.list.findIndex(e => e.it===it);
   addRecent(it); drawVirtual(); updateFavBtn(); loadExtra(it);
   startAttempt(it);
 }
@@ -3803,7 +4000,9 @@ async function startAttempt(it){
   const url = surl(it, att.ext);
   v.volume = UI.vol ?? 1;
   v.onplaying = () => { pv.started = true; pv.tries = 0; clearTimeout(pvTimers.start); pvMsg('يعمل: '+(it.name||'')); };
-  v.onerror = () => { const c = v.error && v.error.code; if(c===3 || c===4) onDecodeFail(it, att, url); else onFail(it, 'error'); };
+  v.onerror = () => {
+    if(pv && pv.mode==='vod-direct' && !pv.started){ pv.noDirect = true; pvStop(); return startAttempt(it); }   // فشل المباشر — عبر الوسيط
+    const c = v.error && v.error.code; if(c===3 || c===4) onDecodeFail(it, att, url); else onFail(it, 'error'); };
   v.onended = () => { if(live) onFail(it, 'ended'); };
   v.onloadedmetadata = () => { if(!live) resumeTo(it); };
   v.ontimeupdate = () => { if(!live) saveResume(it); };
@@ -3812,19 +4011,22 @@ async function startAttempt(it){
     if(!pv || pv.cur!==it) return;
     if(!v.paused && pv.started){ if(Math.abs(v.currentTime-lastT)<0.01) still++; else still = 0; lastT = v.currentTime; if(live && still>=12){ still = 0; onFail(it, 'stall'); } }
   }, 1000);
-  clearTimeout(pvTimers.start); pvTimers.start = setTimeout(() => { if(pv && pv.cur===it && !pv.started) onFail(it, 'timeout'); }, 18000);
+  clearTimeout(pvTimers.start); pvTimers.start = setTimeout(() => { if(pv && pv.cur===it && !pv.started) onFail(it, 'timeout'); }, live ? 12000 : 20000);
   pvMsg((pv.tries ? `إعادة الاتصال (${pv.tries}/3): ` : 'جاري التشغيل: ') + (it.name||''));
   try{
     if(pv.forceTx){ await playTranscode(it, url); return; }
     if(isHlsUrl(it, att)) { pv.mode='hls'; await playHls(v, url); }
     else if(live && (att.ext==='ts' || pv.type==='stalker' || pv.type==='m3u')){ pv.mode='mpegts'; await playTs(v, url, true, it); }
+    else if(!live && pv.type==='xtream' && !proxyOf(pv.r) && !pv.r.ua && !pv.noDirect){   // الأفلام: مباشرة من السيرفر (أسرع)
+      pv.mode='vod-direct'; v.src = directUrl(it); try{ await v.play(); }catch(e){}
+    }
     else { pv.mode='direct'; v.src = url; try{ await v.play(); }catch(e){} }
   }catch(e){ pvMsg((e.message||'تعذّر التشغيل')+' — جرّب «فتح خارجياً».'); }
 }
 async function playTs(v, url, live, it){
   await ensureMpegts();
   if(!(window.mpegts && mpegts.isSupported())){ v.src = url; try{ await v.play(); }catch(e){} return; }
-  pv.player = mpegts.createPlayer({type:'mpegts', isLive:live, url}, {enableWorker:false, enableStashBuffer:true, stashInitialSize:384, liveBufferLatencyChasing:false, autoCleanupSourceBuffer:true});
+  pv.player = mpegts.createPlayer({type:'mpegts', isLive:live, url}, {enableWorker:false, enableStashBuffer:true, stashInitialSize:128, lazyLoad:false, liveBufferLatencyChasing:false, autoCleanupSourceBuffer:true});
   pv.player.attachMediaElement(v); pv.player.load();
   pv.player.on(mpegts.Events.ERROR, (type, detail, info) => {
     if(!pv || pv.cur!==it) return;
@@ -3930,6 +4132,7 @@ $('#pvPip').onclick = async () => { try{ const v=$('#pvVideo'); document.picture
 $('#pvVideo').addEventListener('volumechange', () => { if(pv){ UI.vol = $('#pvVideo').volume; saveSoon(); } });
 $('#pvRefresh').onclick = async () => {
   if(!pv) return; pvMsg('جاري إعادة جلب القوائم من السيرفر...'); delete PVC[sk()];
+  pv.forceLists = true;
   let err=''; try{ err = await loadContent(true); }catch(e){ err='تعذر الجلب'; }
   if(!pv) return; tabLabels(); await switchTab(pv.tab==='fav'||pv.tab==='recent' ? pv.tab : pv.tab);
   pvMsg(err ? ('تعذر الجلب: '+err) : 'تم تحديث القوائم.');
@@ -3983,23 +4186,26 @@ $('#btnChSearch').onclick = async () => {
   const label = terms.join(', ');
   UI.chTerms = [label].concat((UI.chTerms||[]).filter(t => t!==label)).slice(0,10); renderChSaved();
   const verify = $('#chVerify').checked, force = !!$('#btnChSearch')._force;
+  const kinds = [['live','#chkLive'],['vod','#chkVod'],['series','#chkSeries']].filter(([k,id]) => $(id).checked).map(([k]) => k);
+  if(!kinds.length) return toast('اختر نوعاً واحداً على الأقل: قنوات أو أفلام أو مسلسلات');
+  UI.chKinds = kinds;
   rows.forEach(r => { if(!list.includes(r)) delete r.chs; });
   list.forEach(r => r.chs = {busy:true, terms});
   running = true; stop = false; setBtns(); render();
   const conc = Math.max(1, Math.min(20, +$('#conc').value || 8));
   let i = 0, done = 0, found = 0; const total = list.length;
   $('#bar').style.width = '0%';
-  msg(`جاري البحث عن «${label}» في قنوات ${total} سيرفر...`);
+  msg(`جاري البحث عن «${label}» في محتوى ${total} سيرفر...`);
   async function w(){
     while(!stop && i < list.length){
       const r = list[i++];
       try{
-        const out = await api('/api/chsearch', checkPayload(r, {terms, verify, force, timeout: Math.max(20, +$('#tmo').value || 15)}));
+        const out = await api('/api/chsearch', checkPayload(r, {terms, verify, force, kinds, timeout: Math.max(20, +$('#tmo').value || 15)}));
         r.chs = Object.assign(out, {terms, at: Date.now()});
         if(out.count>0) found++;
       }catch(e){ r.chs = {error:'تعذّر الاتصال بالأداة', terms}; }
       done++; $('#bar').style.width = (done/total*100).toFixed(1)+'%';
-      msg(`البحث في القنوات: ${done}/${total} — وُجدت في ${found} سيرفر`);
+      msg(`البحث في المحتوى: ${done}/${total} — وُجدت في ${found} سيرفر`);
       touch(r);
     }
   }
@@ -4014,7 +4220,8 @@ function openChMatches(r){
   chmRow = r; const x = r.chs || {};
   $('#chmHost').textContent = (r.title || defaultName(r.host)) + (r.username ? ' — ' + r.username : '');
   const v = x.verified;
-  $('#chmInfo').innerHTML = `البحث: <b>${esc((x.terms||[]).join(', '))}</b> — ${x.count} قناة مطابقة من أصل ${x.total}` +
+  const by = x.by || {}, parts = [['live','📺 قنوات'],['vod','🎬 أفلام'],['series','📂 مسلسلات']].filter(([k]) => by[k]).map(([k,l]) => `${l}: ${by[k]}`).join(' — ');
+  $('#chmInfo').innerHTML = `البحث: <b>${esc((x.terms||[]).join(', '))}</b> — ${x.count} نتيجة من أصل ${x.total}${parts ? '<br>'+parts : ''}` +
     (v ? `<br>${v.ok ? '✅ تم التأكد أن «'+esc(v.name)+'» تبث'+(v.kbps?` (${v.kbps} kbps)`:'') : '⚠️ لم تبث القنوات المجرَّبة: '+esc(v.why||'')}` : '') +
     (x.count > (x.matches||[]).length ? `<br><span class="small">يُعرض أول ${(x.matches||[]).length} نتيجة.</span>` : '');
   $('#chmQ').value = ''; drawChm(); $('#chm').classList.add('on');
@@ -4022,15 +4229,26 @@ function openChMatches(r){
 function drawChm(){
   const q = $('#chmQ').value.trim().toLowerCase(), m = ((chmRow && chmRow.chs && chmRow.chs.matches) || []);
   $('#chmList').innerHTML = m.map((x,i) => [x,i]).filter(([x]) => !q || (x.name+' '+(x.cat||'')).toLowerCase().includes(q))
-    .map(([x,i]) => `<div class="it"><button class="icon" data-i="${i}" title="تشغيل">▶️</button><span title="${esc(x.name)}">${esc(x.name)}</span><em>${esc(x.cat||'')}</em></div>`).join('') || '<div class="small">لا يوجد</div>';
+    .map(([x,i]) => `<div class="it"><button class="icon" data-i="${i}" title="${x.kind==='series'?'فتح الحلقات':'تشغيل'}">${x.kind==='series'?'📂':'▶️'}</button><span title="${esc(x.name)}">${({live:'📺 ',vod:'🎬 ',series:'📂 '})[x.kind||'live']}${esc(x.name)}</span><em>${esc(x.cat||'')}</em></div>`).join('') || '<div class="small">لا يوجد</div>';
 }
 $('#chmQ').oninput = drawChm;
 $('#chmClose').onclick = () => closeOv('#chm');
 $('#chmList').onclick = async e => {
   const b = e.target.closest('[data-i]'); if(!b || !chmRow) return;
   const m = chmRow.chs.matches[+b.dataset.i]; closeOv('#chm');
-  await openPlayer(chmRow, {q: m.name});
+  const kind = m.kind || 'live';
+  await openPlayer(chmRow, {q: kind==='live' ? m.name : ''});
   if(!pv) return;
+  if(kind !== 'live'){
+    await switchTab(kind); if(!pv) return;
+    $('#pvQ').value = m.name; buildList();
+    const items = (pv.data[kind] && pv.data[kind].items) || [];
+    const it = items.find(c => String(c.id)===String(m.id)) || items.find(c => c.name===m.name);
+    if(!it) return pvMsg('لم أجد العنصر في القائمة — اختره من القائمة.');
+    const idx = pv.list.findIndex(e => e.it && String(e.it.id)===String(it.id));
+    if(idx >= 0) onItemClick(idx); else if(kind==='vod') playItem(it);
+    return;
+  }
   const it = (pv.data.live.items||[]).find(c => (m.cmd && c.cmd===m.cmd) || (m.ou && c.ou===m.ou) || (m.id!=null && !m.cmd && !m.ou && String(c.id)===String(m.id))) || (pv.data.live.items||[]).find(c => c.name===m.name);
   if(it) playItem(it); else pvMsg('لم أجد القناة في القائمة — اخترها من القائمة.');
 };
@@ -4066,6 +4284,7 @@ function openUa(list){
   const known = [...$('#uaSel').options].some(o => o.value===cur);
   $('#uaSel').value = known ? cur : '__custom'; $('#uaCustom').value = known ? '' : cur;
   $('#uaCustomRow').style.display = $('#uaSel').value==='__custom' ? '' : 'none';
+  $('#uaRes').innerHTML = ''; $('#uaDetMsg').textContent = '';
   $('#uamFor').textContent = list.length > 1 ? `(${list.length} سيرفرات محددة)` : (list[0].title || defaultName(list[0].host));
   $('#uam').classList.add('on');
 }
@@ -4079,6 +4298,32 @@ $('#uaSave').onclick = () => {
   if($('#uaRecheck').checked) runChecks(uaRows.slice());
 };
 $('#bkUa').onclick = () => openUa(selected());
+async function detectUa(r, stream){
+  return api('/api/ua_detect', checkPayload(r, {stream: stream!==false, timeout: 10}));
+}
+$('#uaDetect').onclick = async () => {
+  if(!uaRows.length) return;
+  $('#uaDetect').disabled = true;
+  if(uaRows.length > 1){                                   // عدة سيرفرات: اكتشف لكل واحد وطبّق الأفضل
+    let done = 0, set = 0;
+    for(const r of uaRows){
+      $('#uaDetMsg').textContent = `جاري الاكتشاف ${++done}/${uaRows.length}...`;
+      try{ const d = await detectUa(r, false); if(d.best && !d.default_ok){ r.ua = d.best; set++; } }catch(e){}
+    }
+    $('#uaDetMsg').textContent = `تم: ضُبطت هوية مخصصة لـ ${set} سيرفر، والباقي يعمل بالتلقائي أو لم تنجح معه أي هوية.`;
+    $('#uaDetect').disabled = false; render(); return;
+  }
+  $('#uaDetMsg').textContent = 'جاري تجربة كل الهويات (قد يستغرق دقيقة)...';
+  let d; try{ d = await detectUa(uaRows[0], true); }catch(e){ $('#uaDetMsg').textContent = 'تعذّر الاكتشاف'; $('#uaDetect').disabled = false; return; }
+  const ic = v => v===true ? '✅' : v===false ? '❌' : '—';
+  $('#uaRes').innerHTML = `<table class="tbl2"><tr><th>الهوية</th><th>قبول الحساب</th><th>البث</th><th>ملاحظة</th></tr>` +
+    d.results.map(x => `<tr${x.ua===d.best?' style="background:#123d24"':''}><td>${esc(x.name)}</td><td>${ic(x.api)}</td><td>${ic(x.stream)}</td><td class="small">${esc(x.why||'')}</td></tr>`).join('') + '</table>';
+  if(!d.best) $('#uaDetMsg').textContent = '⚠️ لم تنجح أي هوية — المشكلة غالباً ليست في الهوية (حساب منتهٍ أو محظور أو السيرفر متوقف).';
+  else if(d.default_ok) $('#uaDetMsg').textContent = '✅ السيرفر يقبل الهوية الافتراضية — لا حاجة لهوية مخصصة (اتركها «تلقائي»).';
+  else { $('#uaDetMsg').textContent = '✅ الأنسب: ' + d.best_name + ' — تم اختيارها، اضغط «حفظ».'; $('#uaSel').value = d.best; $('#uaCustomRow').style.display = 'none'; }
+  if(d.default_ok) $('#uaSel').value = '';
+  $('#uaDetect').disabled = false;
+};
 
 // ---------------- أحداث الجدول ----------------
 $('#tb').onclick = async e => {
@@ -4321,7 +4566,7 @@ async function loadSettings(){
 }
 function fillSettings(){
   $('#sTmo').value = SET.timeout; $('#sConc').value = SET.conc; $('#sDom').value = SET.per_domain; $('#sAuto').value = SET.auto_hours;
-  $('#sDeep').checked = !!SET.deep_default; $('#sCount').checked = !!SET.count_default; $('#sAdult').checked = SET.adult_scan!==false; $('#sUpd').checked = SET.updates!==false;
+  $('#sDeep').checked = !!SET.deep_default; $('#sCount').checked = !!SET.count_default; $('#sAdult').checked = SET.adult_scan!==false; $('#sUaAuto').checked = SET.ua_auto!==false; $('#sUpd').checked = SET.updates!==false;
   $('#sPlayer').value = SET.ext_player || 'auto'; $('#sPlayerPath').value = SET.ext_player_path || ''; $('#sDirect').checked = !!SET.ext_direct; $('#sFfmpeg').value = SET.ffmpeg_path || '';
   const f = (n,p) => `${n}: ${p ? '✅' : '—'}`;
   $('#sCaps').textContent = `الأدوات المكتشفة — ${f('ffmpeg',CAPS.ffmpeg)} | ${f('VLC',CAPS.vlc)} | ${f('mpv',CAPS.mpv)}${CAPS.iina!==undefined&&CAPS.platform==='darwin'?' | '+f('IINA',CAPS.iina):''}${CAPS.platform&&CAPS.platform.startsWith('win')?' | '+f('PotPlayer',CAPS.potplayer):''}`;
@@ -4332,7 +4577,7 @@ $('#stClose').onclick = () => closeOv('#st');
 $('#sUpdNow').onclick = () => { closeOv('#st'); checkUpdate(true); };
 $('#sSave').onclick = async () => {
   const d = {timeout:+$('#sTmo').value||15, conc:+$('#sConc').value||8, per_domain:+$('#sDom').value||2, auto_hours:+$('#sAuto').value||0,
-    deep_default:$('#sDeep').checked, count_default:$('#sCount').checked, adult_scan:$('#sAdult').checked, updates:$('#sUpd').checked, ext_player:$('#sPlayer').value,
+    deep_default:$('#sDeep').checked, count_default:$('#sCount').checked, adult_scan:$('#sAdult').checked, ua_auto:$('#sUaAuto').checked, updates:$('#sUpd').checked, ext_player:$('#sPlayer').value,
     ext_player_path:$('#sPlayerPath').value.trim(), ext_direct:$('#sDirect').checked, ffmpeg_path:$('#sFfmpeg').value.trim()};
   try{ const r = await api('/api/settings', {op:'set', data:d}); SET = Object.assign(SET, r.settings||d); CAPS = r.caps||CAPS; }catch(e){ return toast('تعذر الحفظ'); }
   $('#tmo').value = SET.timeout; $('#conc').value = SET.conc; closeOv('#st'); toast('تم حفظ الإعدادات');
@@ -4405,6 +4650,7 @@ async function restoreSession(){
     }
     if(d.text && !$('#inp').value) $('#inp').value = d.text;
     if(UI.chq) $('#chq').value = UI.chq;
+    if(Array.isArray(UI.chKinds)){ $('#chkLive').checked = UI.chKinds.includes('live'); $('#chkVod').checked = UI.chKinds.includes('vod'); $('#chkSeries').checked = UI.chKinds.includes('series'); }
     renderChSaved();
   }catch(e){}
 }
@@ -4571,8 +4817,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header('Content-Type', 'video/mp2t' if path.endswith('.ts') else 'application/octet-stream')
             self.send_header('Cache-Control', 'no-store')
             self.end_headers()
+            rd = getattr(up, 'read1', None) or up.read     # read1: يرسل ما وصل فوراً بدل انتظار امتلاء الكتلة
             while True:
-                chunk = up.read(262144)
+                chunk = rd(131072)
                 if not chunk:
                     break
                 self.wfile.write(chunk)
@@ -4620,7 +4867,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header('Cache-Control', 'no-store')
             self.end_headers()
             while True:
-                chunk = proc.stdout.read(65536)
+                chunk = (getattr(proc.stdout, 'read1', None) or proc.stdout.read)(65536)
                 if not chunk:
                     break
                 self.wfile.write(chunk)
@@ -4684,9 +4931,14 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/reg':
             return {'s': reg_server(data)}
         if path == '/api/content':
-            return get_content(sget('host'), sget('username'), sget('password'), opener=op_)
+            k = 'content|' + hist_key('xtream', data) + '|' + _cur_ua()
+            return cached_list(k, lambda: get_content(sget('host'), sget('username'), sget('password'), opener=op_),
+                               bool(data.get('force')), lambda r: bool((r.get('live') or {}).get('items')))
         if path == '/api/streams':
-            return get_streams(sget('host'), sget('username'), sget('password'), sget('kind', 'live'), opener=op_)
+            kind = sget('kind', 'live')
+            k = 'streams|' + kind + '|' + hist_key('xtream', data) + '|' + _cur_ua()
+            return cached_list(k, lambda: get_streams(sget('host'), sget('username'), sget('password'), kind, opener=op_),
+                               bool(data.get('force')), lambda r: bool(r.get('items')))
         if path == '/api/series':
             return get_series_info(sget('host'), sget('username'), sget('password'), data.get('series_id'), opener=op_)
         if path == '/api/vodinfo':
@@ -4694,7 +4946,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/epg':
             return get_epg(sget('host'), sget('username'), sget('password'), data.get('stream_id'), opener=op_)
         if path == '/api/stalker':
-            return stalker_channels(sget('portal'), sget('mac'), sget('proxy'))
+            k = 'stalker|' + hist_key('stalker', data) + '|' + _cur_ua()
+            return cached_list(k, lambda: stalker_channels(sget('portal'), sget('mac'), sget('proxy')),
+                               bool(data.get('force')), lambda r: bool(r.get('items')))
         if path == '/api/stalker_link':
             try:
                 return {'url': stalker_link(sget('portal'), sget('mac'), sget('cmd'), sget('proxy'))}
@@ -4785,6 +5039,11 @@ class Handler(BaseHTTPRequestHandler):
                 return {'ok': True, 'via': launch_external(url, st.get('ext_player', 'auto'), st.get('ext_player_path', ''))}
             except Exception as e:
                 return {'ok': False, 'reason': str(e)[:160]}
+        if path == '/api/ua_detect':
+            typ = data.get('type') or 'xtream'
+            hk = data.get('portal') if typ == 'stalker' else (data.get('url') if typ == 'm3u' else data.get('host'))
+            with _dom_sem(hk):
+                return ua_detect(data, max(4, min(30, int(data.get('timeout') or 10))), data.get('stream', True) is not False)
         if path == '/api/adult':
             typ = data.get('type') or 'xtream'
             hk = data.get('portal') if typ == 'stalker' else (data.get('url') if typ == 'm3u' else data.get('host'))
@@ -4798,7 +5057,8 @@ class Handler(BaseHTTPRequestHandler):
                 terms = re.split(r'[,،;\n]+', terms)
             with _dom_sem(hk):
                 return channel_search(data, terms, bool(data.get('verify')),
-                                      max(5, min(120, int(data.get('timeout') or 25))), bool(data.get('force')))
+                                      max(5, min(120, int(data.get('timeout') or 25))), bool(data.get('force')),
+                                      data.get('kinds') or ['live'])
         if path == '/api/check':
             t = max(3, min(120, int(data.get('timeout') or DEFAULT_TIMEOUT)))
             proxy = sget('proxy')

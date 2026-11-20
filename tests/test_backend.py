@@ -274,3 +274,43 @@ class TestUpdate(Base):
         with open(p, 'wb') as f:
             f.write(b'abc')
         self.assertEqual(ic._sha256(p), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad')
+
+
+class TestV66(Base):
+    def test_search_vod_series(self):
+        r = self.post('/api/chsearch', dict(host=self.murl, username='u1', password='p1', terms='movie, show',
+                                            kinds=['live', 'vod', 'series'], verify=True))
+        self.assertEqual(r['by'].get('vod'), 1)
+        self.assertEqual(r['by'].get('series'), 1)
+        kinds = sorted(m['kind'] for m in r['matches'])
+        self.assertEqual(kinds, ['series', 'vod'])
+        self.assertTrue(r['verified']['ok'])
+
+    def test_list_cache(self):
+        body = dict(host=self.murl, username='u1', password='p1')
+        a = self.post('/api/content', body)
+        self.assertNotIn('cached_at', a)
+        b = self.post('/api/content', body)
+        self.assertIn('cached_at', b)
+        c = self.post('/api/content', dict(body, force=True))
+        self.assertNotIn('cached_at', c)
+
+    def test_ua_detect(self):
+        r = self.post('/api/ua_detect', dict(host=self.murl, username='u1', password='p1', stream=True), timeout=120)
+        self.assertTrue(r['default_ok'])
+        self.assertTrue(all(x['api'] for x in r['results']))
+        self.assertTrue(r['results'][0]['stream'])
+
+    def test_bundled_ffmpeg_lookup(self):
+        d = tempfile.mkdtemp()
+        p = os.path.join(d, 'bin')
+        os.makedirs(p)
+        fake = os.path.join(p, 'ffmpeg' + ('.exe' if sys.platform.startswith('win') else ''))
+        with open(fake, 'w') as f:
+            f.write('x')
+        old = ic._DATA_DIR
+        try:
+            ic._DATA_DIR = d
+            self.assertEqual(ic._find_tool('ffmpeg'), fake)
+        finally:
+            ic._DATA_DIR = old
