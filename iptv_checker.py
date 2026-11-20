@@ -32,7 +32,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-VERSION = "6.2"
+VERSION = "6.3"
 UA = "VLC/3.0.20 LibVLC/3.0.20"
 DEFAULT_TIMEOUT = 15
 
@@ -2236,9 +2236,9 @@ HTML = r"""<!doctype html>
 *{box-sizing:border-box}
 html,body{max-width:100%;overflow-x:hidden}
 body{margin:0;background:var(--bg);color:var(--text);font-family:"Segoe UI",Tahoma,"Noto Kufi Arabic",Arial,sans-serif;font-size:14px}
-header{padding:16px 24px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+header{padding:clamp(8px,1.2vw,16px) clamp(10px,1.6vw,26px);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;flex-wrap:wrap}
 h1{font-size:20px;margin:0}
-main{padding:18px 24px;max-width:1600px;margin:auto}
+main{padding:clamp(8px,1.4vw,22px) clamp(8px,1.6vw,26px);max-width:none;margin:0}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
 textarea{width:100%;min-height:170px;background:#0a0e12;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:10px;font-family:Consolas,"Courier New",monospace;font-size:13px;direction:ltr;text-align:left;resize:vertical}
 textarea:focus,input:focus,select:focus{outline:2px solid var(--acc);outline-offset:-1px}
@@ -2259,11 +2259,13 @@ input[type=number]{width:66px}
 .stat.sel{outline:2px solid var(--acc)}
 .prog{height:6px;background:#0a0e12;border-radius:4px;overflow:hidden;margin-top:14px}
 .prog div{height:100%;width:0;background:var(--acc);transition:width .2s}
-.tw{overflow:auto;max-height:68vh;border-radius:8px}
+.tw{overflow:auto;max-height:68vh;min-height:260px;border-radius:8px}
 table{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed}
 th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:right;vertical-align:middle;word-break:break-word;overflow-wrap:anywhere}
 th{color:var(--mute);font-weight:600;position:sticky;top:0;background:var(--card);z-index:1}
 .thf{display:flex;align-items:center;gap:4px;justify-content:space-between}
+.thf span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+th{white-space:nowrap}
 .fbtn{background:#0a0e12;border:1px solid var(--line);color:var(--mute);border-radius:5px;padding:0 5px;font-size:11px;line-height:18px;cursor:pointer;flex:0 0 auto}
 .fbtn:hover{color:var(--text);border-color:var(--acc)}
 .fbtn.on{background:var(--acc);color:#fff;border-color:var(--acc)}
@@ -2279,6 +2281,7 @@ th{color:var(--mute);font-weight:600;position:sticky;top:0;background:var(--card
 #clrF.on{display:inline-block}
 tr:hover td{background:#1c2530}
 tr.dragging{opacity:.4}
+tr.dragmate{opacity:.4}
 tr.bestrow td{background:#132617}
 tr.chrow td{background:#2b2108}
 tr.hi td{background:#16325c !important;transition:background .3s}
@@ -2328,12 +2331,12 @@ col.c-ping{width:6%} col.c-note{width:7%} col.c-name{width:13%} col.c-act{width:
 body.drag main{outline:3px dashed var(--acc);outline-offset:-8px;border-radius:12px}
 .ov{position:fixed;inset:0;background:rgba(0,0,0,.72);display:none;align-items:center;justify-content:center;z-index:50;padding:14px}
 .ov.on{display:flex}
-.modal{background:var(--card);border:1px solid var(--line);border-radius:14px;width:100%;max-width:1040px;max-height:94vh;display:flex;flex-direction:column;overflow:hidden}
+.modal{background:var(--card);border:1px solid var(--line);border-radius:14px;width:100%;max-width:min(96vw,1800px);max-height:96vh;display:flex;flex-direction:column;overflow:hidden}
 .mhead{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
 .mbody{display:flex;gap:12px;padding:12px;min-height:0;flex:1;overflow:hidden}
 .mvid{flex:2;min-width:0;display:flex;flex-direction:column;gap:8px}
-.mlist{flex:1;min-width:220px;max-width:340px;display:flex;flex-direction:column;gap:8px;min-height:0}
-.ov video{width:100%;background:#000;border-radius:8px;aspect-ratio:16/9;max-height:56vh}
+.mlist{flex:1;min-width:240px;max-width:clamp(260px,26vw,460px);display:flex;flex-direction:column;gap:8px;min-height:0}
+.ov video{width:100%;background:#000;border-radius:8px;aspect-ratio:16/9;max-height:72vh}
 .chlist{overflow:auto;border:1px solid var(--line);border-radius:8px;flex:1;min-height:130px}
 .chlist{position:relative}
 #pvSp{position:relative;width:100%}
@@ -2391,6 +2394,11 @@ body.nfs #pvVideo{width:100vw;height:100vh;max-height:100vh;border-radius:0}
 .tabs{display:flex;gap:4px}
 .tab{flex:1;background:#0a0e12;border:1px solid var(--line);color:var(--mute);border-radius:7px;padding:6px 4px;font-size:12px;cursor:pointer;font-weight:600}
 .tab.sel{background:var(--acc);color:#fff;border-color:var(--acc)}
+.mbody{min-height:0}
+#ov .modal{height:96vh}
+#ov .mlist .chlist{flex:1;min-height:200px;max-height:none}
+body.compact #inCard{display:none}
+@media(min-width:1900px){body{font-size:15px}table{font-size:14px}}
 @media(max-width:760px){.mbody{flex-direction:column}.mlist{max-width:none}.ov video{max-height:40vh}}
 </style>
 </head>
@@ -2418,13 +2426,14 @@ body.nfs #pvVideo{width:100vw;height:100vh;max-height:100vh;border-radius:0}
     <span class="small">فاحص سيرفرات IPTV — يعمل محلياً على جهازك — الإصدار <span class="ltr">__VER__</span></span>
   </div>
   <div class="hact">
+    <button class="sec" id="btnCompact" title="إخفاء/إظهار خانة الإدخال لإعطاء الجدول مساحة أكبر">⬍ تكبير الجدول</button>
     <button class="sec" id="btnLog" title="سجل التشخيص">🧾 السجل</button>
     <button class="sec" id="btnSet" title="الإعدادات">⚙️ الإعدادات</button>
   </div>
 </header>
 <div id="upd"></div>
 <main>
-<div class="card">
+<div class="card" id="inCard">
   <div class="small" style="margin-bottom:8px">
     الصق السيرفرات هنا بأي شكل وبأي عدد: روابط
     <span class="ltr">M3U</span>
@@ -2660,9 +2669,9 @@ let SET = {per_domain:2, ffmpeg_path:'', ext_player:'auto', ext_player_path:'', 
 let CAPS = {};
 let UI = {hidden:['conn','msg'], vol:1, favs:{}, recents:{}, resume:{}, lastAuto:0, chTerms:[], chq:''};
 const COLS = [
-  ['sel','☑',34,false],['n','#',54,false],['st','الحالة',118,false],['host','السيرفر',250,false],['user','المستخدم',130,true],['pass','كلمة المرور',130,true],
-  ['exp','الانتهاء',104,true],['days','الأيام',92,true],['conn','الاتصالات',84,true],['ping','الاستجابة',82,true],['q','الجودة',92,true],['score','التقييم',66,true],
-  ['chs','القنوات المطابقة',118,true],['note','وسوم / ملاحظة',140,true],['msg','ملاحظات الفحص',170,true],['name','الاسم في iptvnator',150,true],['acts','',196,false]
+  ['sel','☑',34,false],['n','#',76,false],['st','الحالة',106,false],['host','السيرفر',170,false],['user','المستخدم',90,true],['pass','كلمة المرور',90,true],
+  ['exp','الانتهاء',96,true],['days','الأيام',88,true],['conn','الاتصالات',80,true],['ping','الاستجابة',90,true],['q','الجودة',88,true],['score','التقييم',78,true],
+  ['chs','القنوات المطابقة',110,true],['note','وسوم / ملاحظة',90,true],['msg','ملاحظات الفحص',110,true],['name','الاسم في iptvnator',100,true],['acts','',176,false]
 ];
 const COLNAME = {chs:'القنوات المطابقة',user:'المستخدم',pass:'كلمة المرور',exp:'تاريخ الانتهاء',days:'الأيام المتبقية',conn:'الاتصالات',ping:'الاستجابة',q:'جودة البث',score:'التقييم',note:'وسوم / ملاحظة',msg:'ملاحظات الفحص',name:'الاسم في iptvnator'};
 const hasCh = () => rows.some(r => r.chs);
@@ -2795,10 +2804,16 @@ function rowHtml(r, i){
 }
 function renderHead(){
   const cols = shownCols();
-  $('#cg').innerHTML = cols.map(c => `<col style="width:${c[2]}px">`).join('');
+  const FLEX = {host:3, user:1.2, pass:1.2, msg:1.8, note:1.1, name:1.4};
+  const fixed = cols.filter(c => !FLEX[c[0]]).reduce((a,c) => a + c[2], 0);
+  const flexW = cols.filter(c => FLEX[c[0]]).reduce((a,c) => a + FLEX[c[0]], 0);
+  const avail = Math.max(0, ($('.tw').clientWidth || window.innerWidth) - fixed - 4);
+  const minTotal = fixed + cols.filter(c => FLEX[c[0]]).reduce((a,c) => a + c[2], 0);
+  $('#cg').innerHTML = cols.map(c => `<col style="width:${FLEX[c[0]] ? Math.max(c[2], Math.floor(avail*FLEX[c[0]]/flexW)) : c[2]}px">`).join('');
+  $('#cg').closest('table').style.minWidth = minTotal + 'px';
   const cf = UI.colf || {};
   $('#hr').innerHTML = cols.map(c => c[0]==='sel' ? '<th><input type="checkbox" id="selAll" title="تحديد الكل"></th>'
-    : FCOL[c[0]] ? `<th><div class="thf"><span>${c[1]}</span><button class="fbtn ${cf[c[0]]?'on':''}" data-fc="${c[0]}" title="فلتر العمود">▾</button></div></th>` : `<th>${c[1]}</th>`).join('');
+    : FCOL[c[0]] ? `<th title="${c[1]}"><div class="thf"><span>${c[1]}</span><button class="fbtn ${cf[c[0]]?'on':''}" data-fc="${c[0]}" title="فلتر العمود">▾</button></div></th>` : `<th>${c[1]}</th>`).join('');
   $('#clrF').classList.toggle('on', Object.keys(cf).length>0);
 }
 
@@ -3909,6 +3924,23 @@ $('#chmList').onclick = async e => {
   if(it) playItem(it); else pvMsg('لم أجد القناة في القائمة — اخترها من القائمة.');
 };
 
+
+// ---------------- تخطيط ديناميكي حسب حجم النافذة ----------------
+function fitTable(){
+  const tw = $('.tw'); if(!tw) return;
+  const top = tw.getBoundingClientRect().top + window.scrollY;
+  const h = window.innerHeight - Math.min(top, window.innerHeight*0.45) - 28;
+  tw.style.maxHeight = Math.max(300, h) + 'px';
+}
+let fitT = 0;
+window.addEventListener('resize', () => { clearTimeout(fitT); fitT = setTimeout(() => { renderHead(); fitTable(); }, 120); });
+$('#btnCompact').onclick = () => {
+  document.body.classList.toggle('compact');
+  UI.compact = document.body.classList.contains('compact');
+  $('#btnCompact').textContent = UI.compact ? '⬍ إظهار خانة الإدخال' : '⬍ تكبير الجدول';
+  renderHead(); fitTable(); saveSoon();
+};
+
 // ---------------- أحداث الجدول ----------------
 $('#tb').onclick = async e => {
   const cb = e.target.closest('.rsel');
@@ -3930,17 +3962,10 @@ const toLatin = v => String(v).replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.i
 function applyOrder(el){
   const n = parseInt(toLatin(el.value).replace(/[^0-9]/g,''), 10), old = +el.dataset.v;
   if(!n || n===old){ el.value = old; return; }
-  const id = +el.dataset.id;
-  bakeOrder();
-  const vis = visible(), from = vis.findIndex(r => r.id===id); if(from<0) return;
-  const to = Math.max(1, Math.min(vis.length, n)) - 1;
-  const r = rows.splice(rows.findIndex(x => x.id===id), 1)[0];
-  const anchor = vis.filter(x => x.id!==id)[to];          // ضعه قبل السيرفر الذي يشغل هذا الموضع الآن
-  const at = anchor ? rows.indexOf(anchor) : rows.length;
-  rows.splice(at, 0, r);
-  render();
-  const ni = $('#tb').querySelector(`.ordin[data-id="${id}"]`); if(ni){ ni.closest('tr').scrollIntoView({block:'center'}); ni.closest('tr').classList.add('hi'); setTimeout(()=>ni.closest('tr') && ni.closest('tr').classList.remove('hi'), 1500); }
-  msg(`تم نقل السيرفر إلى الترتيب ${to+1}.`);
+  const id = +el.dataset.id, ids = groupOf(id);
+  moveBlock(ids, n - 1);
+  const pos = visible().findIndex(r => r.id===ids[0]) + 1;
+  msg(ids.length > 1 ? `تم نقل ${ids.length} سيرفرات محددة لتبدأ من الترتيب ${pos}.` : `تم نقل السيرفر إلى الترتيب ${pos}.`);
 }
 $('#tb').addEventListener('keydown', e => { const el = e.target.closest('.ordin'); if(el && e.key==='Enter'){ e.preventDefault(); el.blur(); } });
 $('#tb').addEventListener('focusout', e => { const el = e.target.closest('.ordin'); if(el) applyOrder(el); });
@@ -3960,12 +3985,38 @@ function bakeOrder(){
   rows = vis.concat(rows.filter(r => !ids.has(r.id)));
   $('#sort').value = 'orig';
 }
-function moveRow(id, dir){
+// المجموعة التي تتحرك معاً: كل المحدد إن كان السيرفر ضمن تحديد متعدد، وإلا السيرفر وحده
+function groupOf(id){
+  const sel = selected();
+  return (sel.length > 1 && sel.some(r => r.id===id)) ? sel.map(r => r.id) : [id];
+}
+// ينقل مجموعة سيرفرات لتصبح متتالية (بترتيبها الحالي) بدءاً من الموضع target بين باقي السيرفرات الظاهرة
+function moveBlock(ids, target){
   bakeOrder();
-  const i = rows.findIndex(r => r.id===id), j = i + dir;
-  if(i<0 || j<0 || j>=rows.length) return;
-  const t = rows[i]; rows[i] = rows[j]; rows[j] = t;
+  const set = new Set(ids), vis = visible();
+  const block = vis.filter(r => set.has(r.id)), rest = vis.filter(r => !set.has(r.id));
+  if(!block.length) return;
+  target = Math.max(0, Math.min(rest.length, target));
+  rows = rows.filter(r => !set.has(r.id));
+  const anchor = rest[target];
+  const at = anchor ? rows.indexOf(anchor) : rows.length;
+  rows.splice(at, 0, ...block);
   render();
+  flashRows(block.map(r => r.id));
+}
+function flashRows(ids){
+  const trs = ids.map(id => $('#tb').querySelector(`tr[data-id="${id}"]`)).filter(Boolean);
+  if(!trs.length) return;
+  trs[0].scrollIntoView({block:'nearest'});
+  trs.forEach(tr => tr.classList.add('hi'));
+  setTimeout(() => trs.forEach(tr => tr.classList.remove('hi')), 1400);
+}
+function moveRow(id, dir){
+  const ids = groupOf(id), set = new Set(ids), vis = visible();
+  const first = vis.findIndex(r => set.has(r.id)); if(first<0) return;
+  const before = vis.slice(0, first).filter(r => !set.has(r.id)).length;   // موضع المجموعة بين الباقي
+  const compact = vis.filter(r => set.has(r.id)).every((r,k,a) => k===0 || vis.indexOf(r)===vis.indexOf(a[k-1])+1);
+  moveBlock(ids, compact ? before + dir : before);                          // أول ضغطة تجمعها متتالية
 }
 $('#btnReverse').onclick = () => { if(!rows.length) return toast('لا توجد سيرفرات'); bakeOrder(); rows.reverse(); render(); msg('تم عكس الترتيب.'); };
 function bestOf(list){
@@ -4010,20 +4061,25 @@ $('#tb').addEventListener('input', e => {
 });
 
 // ---------------- الترتيب اليدوي بالسحب ----------------
-let dragId = null;
+let dragId = null, dragGroup = [];
 function manualMode(){ return $('#sort').value==='orig' && filter==='all' && !$('#q').value.trim() && !Object.keys(UI.colf||{}).length; }
 $('#tb').addEventListener('dragstart', e => {
   const tr = e.target.closest('tr'); if(!tr) return;
   if(!manualMode()){ e.preventDefault(); toast('للترتيب اليدوي: اختر «يدوي» وأزل البحث والتصفية'); return; }
   if(e.target.closest('input,button,select,a,textarea')){ e.preventDefault(); return; }
   dragId = +tr.dataset.id; tr.classList.add('dragging');
+  dragGroup = groupOf(dragId);
+  if(dragGroup.length > 1){
+    dragGroup.forEach(id => { const t = $('#tb').querySelector(`tr[data-id="${id}"]`); if(t && t!==tr) t.classList.add('dragmate'); });
+    try{ const g = document.createElement('div'); g.textContent = `⠿ ${dragGroup.length} سيرفرات`; g.style.cssText = 'position:absolute;top:-99px;background:#3b82f6;color:#fff;padding:6px 12px;border-radius:8px;font:bold 13px sans-serif'; document.body.appendChild(g); e.dataTransfer.setDragImage(g, 10, 10); setTimeout(()=>g.remove(), 0); }catch(x){}
+  }
   try{ e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain', String(dragId)); }catch(x){}
 });
 $('#tb').addEventListener('dragover', e => {
   if(dragId==null) return;
   e.preventDefault();
   const tr = e.target.closest('tr'); const dragging = $('#tb').querySelector('tr.dragging');
-  if(!tr || !dragging || tr===dragging) return;
+  if(!tr || !dragging || tr===dragging || tr.classList.contains('dragmate')) return;
   const rect = tr.getBoundingClientRect();
   tr.parentNode.insertBefore(dragging, (e.clientY - rect.top) / rect.height > 0.5 ? tr.nextSibling : tr);
 });
@@ -4031,9 +4087,16 @@ $('#tb').addEventListener('drop', e => { e.preventDefault(); });
 $('#tb').addEventListener('dragend', () => {
   const dragging = $('#tb').querySelector('tr.dragging');
   if(dragging) dragging.classList.remove('dragging');
+  $('#tb').querySelectorAll('tr.dragmate').forEach(t => t.classList.remove('dragmate'));
   if(dragId==null) return;
-  dragId = null;
+  const did = dragId; dragId = null;
   const order = [...$('#tb').querySelectorAll('tr')].map(tr => +tr.dataset.id);
+  if(dragGroup.length > 1){                               // سحب جماعي: المجموعة كلها متتالية مكان السحب
+    const set = new Set(dragGroup), at = order.indexOf(did);
+    const target = order.slice(0, at).filter(id => !set.has(id)).length;
+    moveBlock(dragGroup, target); dragGroup = [];
+    msg('تم نقل السيرفرات المحددة معاً.'); return;
+  }
   const pos = {}; order.forEach((id,i) => pos[id]=i);
   rows.sort((a,b) => (pos[a.id]??0) - (pos[b.id]??0));
   render(); msg('تم إعادة الترتيب يدوياً.');
@@ -4242,7 +4305,8 @@ $('#stats').onclick = e => { const s = e.target.closest('.stat'); if(s){ filter 
 (async function init(){
   await loadSettings();
   await restoreSession();
-  render();
+  if(UI.compact){ document.body.classList.add('compact'); $('#btnCompact').textContent = '⬍ إظهار خانة الإدخال'; }
+  render(); fitTable();
   checkUpdate();
 })();
 
