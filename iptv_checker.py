@@ -975,7 +975,7 @@ def get_streams(host, user, pw, kind, timeout=DEFAULT_TIMEOUT, opener=None):
             for c in arr:
                 if not isinstance(c, dict) or c.get(idkey) is None:
                     continue
-                it = {'id': c[idkey], 'name': c.get('name', '') or ('#' + str(c[idkey])),
+                it = {'id': c[idkey], 'name': str(c.get('name', '') or ('#' + str(c[idkey]))),
                       'cat': str(c.get('category_id', ''))}
                 ic = c.get('stream_icon') or c.get('cover') or ''
                 if ic:
@@ -2005,7 +2005,7 @@ def stalker_channels(portal, mac, proxy='', timeout=20):
                     break
         for c in lst:
             if isinstance(c, dict) and c.get('cmd'):
-                out['items'].append({'id': c.get('id') or c.get('cmd'), 'name': c.get('name') or '',
+                out['items'].append({'id': c.get('id') or c.get('cmd'), 'name': str(c.get('name') or ''),
                                      'cat': str(c.get('tv_genre_id', '')), 'cmd': c.get('cmd')})
         if not out['items']:
             out['error'] = 'لم تُرجع البوابة أي قنوات'
@@ -3837,12 +3837,17 @@ async function openPlayer(r, keep){
   pvMsg('جاري تجهيز الاتصال...');
   try{ pv.sid = await regSrv(r); }catch(e){ pvMsg('تعذر تجهيز السيرفر.'); return; }
   if(!pv) return;
-  pvMsg('جاري جلب القنوات...');
+  pv.data = null; tabLabels();
+  const t0 = Date.now(), me = pv;
+  const tick = () => { if(pv===me && !pv.data) pvMsg(`جاري جلب القنوات من السيرفر... ${Math.round((Date.now()-t0)/1000)} ث (القوائم الكبيرة تأخذ وقتاً في أول مرة فقط، ثم تُحفظ)`); };
+  tick(); const tmr = setInterval(tick, 1000);
   let err = '';
   try{ err = await loadContent(false); }catch(e){ err = 'تعذر جلب المحتوى من السيرفر.'; }
-  if(!pv) return;
-  tabLabels();
-  await switchTab('live', keep);
+  clearInterval(tmr);
+  if(!pv || pv!==me) return;
+  if(!pv.data) pv.data = {live:{cats:{},items:[],loaded:true}, vod:{cats:{},items:[],loaded:false}, series:{cats:{},items:[],loaded:false}};
+  try{ tabLabels(); await switchTab('live', keep); }
+  catch(e){ pvMsg('تعذّر عرض القائمة: ' + (e && e.message || e) + ' — اضغط 🔄'); return; }
   const nL = pv.data.live.items.length;
   const cnote = pv.cachedAt ? ` (من الذاكرة المحفوظة — ${new Date(pv.cachedAt*1000).toLocaleString()}، اضغط 🔄 للتحديث)` : '';
   pvMsg(nL ? `جاهز — ${nL} قناة.${t==='xtream'?' الأفلام والمسلسلات تُحمَّل عند فتح قسمها.':''}${cnote}` : (err ? ('تعذر جلب البث: '+err) : 'لا قنوات.'));
