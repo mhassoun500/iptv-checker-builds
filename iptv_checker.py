@@ -32,7 +32,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-VERSION = "7.2"
+VERSION = "7.3"
 UA = "VLC/3.0.20 LibVLC/3.0.20"
 DEFAULT_TIMEOUT = 15
 
@@ -2676,7 +2676,7 @@ body.nfs #pvVideo{width:100vw;height:100vh;max-height:100vh;border-radius:0}
 #ov .modal{height:96vh}
 #ov .mlist .chlist{flex:1;min-height:200px;max-height:none}
 body.compact #inCard{display:none}
-#uam,#chm,#grpm{z-index:60}
+#uam,#chm,#grpm,#bkm{z-index:60}
 @media(min-width:1900px){body{font-size:15px}table{font-size:14px}}
 @media(max-width:760px){.mbody{flex-direction:column}.mlist{max-width:none}.ov video{max-height:40vh}}
 </style>
@@ -2887,6 +2887,14 @@ http://example.com:8080/live/USER/PASS/12345.ts"></textarea>
 </div>
 
 <div class="menu" id="fmenu"></div>
+
+<div class="ov" id="bkm"><div class="modal sm">
+  <div class="mhead"><b>🕘 استعادة جلسة سابقة</b><span style="flex:1"></span><button class="danger" id="bkmClose">إغلاق ✕</button></div>
+  <div class="mpad">
+    <div class="hint">يحفظ البرنامج تلقائياً آخر 10 نسخ من قائمتك: كل 10 دقائق، وقبل أي حذف أو مسح. الاستعادة تستبدل القائمة الحالية (ويمكن التراجع).</div>
+    <table class="tbl2" id="bkmTb" style="margin-top:8px"></table>
+  </div>
+</div></div>
 <div class="menu" id="ctxm" style="position:fixed;min-width:150px;z-index:400"></div>
 
 <div class="ov" id="grpm"><div class="modal sm" style="max-width:560px">
@@ -2977,7 +2985,7 @@ http://example.com:8080/live/USER/PASS/12345.ts"></textarea>
     <div class="fld"><label>مسار ffmpeg (اختياري — يُكتشف تلقائياً)</label><input type="text" id="sFfmpeg" class="ltr" placeholder="/opt/homebrew/bin/ffmpeg"></div>
     <div class="hint" id="sCaps"></div>
     <div class="hint ltr" id="sDir" style="margin-top:6px"></div>
-    <div class="row"><button class="sec" id="sUpdNow">🔄 التحقق من التحديثات الآن</button></div>
+    <div class="row"><button class="sec" id="sUpdNow">🔄 التحقق من التحديثات الآن</button><button class="sec" id="sRestore">🕘 استعادة جلسة سابقة</button></div>
     <div class="row"><button id="sSave">حفظ</button></div>
   </div>
 </div></div>
@@ -3552,6 +3560,7 @@ $('#btnStop').onclick = () => { stop = true; msg('جاري الإيقاف...'); 
 $('#btnClearText').onclick = () => { $('#inp').value=''; $('#inp').focus(); msg('تم مسح النص فقط — النتائج في الجدول باقية.'); };
 $('#btnClear').onclick = () => {
   if(!rows.length){ $('#inp').value=''; return; }
+  if(!confirm(`سيتم مسح كل السيرفرات (${rows.length}) والنص. هل تتابع؟`)) return;
   const old = rows, oldTxt = $('#inp').value;
   rows=[]; $('#inp').value=''; $('#bar').style.width='0%'; msg(''); render();
   toast('تم مسح كل النتائج', '↩ تراجع', () => { rows = old; $('#inp').value = oldTxt; render(); });
@@ -4885,6 +4894,24 @@ function fillSettings(){
 $('#btnSet').onclick = async () => { await loadSettings(); fillSettings(); $('#st').classList.add('on'); };
 $('#stClose').onclick = () => closeOv('#st');
 $('#sUpdNow').onclick = () => { closeOv('#st'); checkUpdate(true); };
+$('#sRestore').onclick = async () => {
+  $('#bkm').classList.add('on'); $('#bkmTb').innerHTML = '<tr><td>⏳</td></tr>';
+  let r; try{ r = await api('/api/session', {op:'backups'}); }catch(e){ r = {items:[]}; }
+  const items = r.items || [];
+  $('#bkmTb').innerHTML = items.length ? '<tr><th>الوقت</th><th>عدد السيرفرات</th><th></th></tr>' + items.map(x =>
+    `<tr><td>${esc(new Date(x.time*1000).toLocaleString())}</td><td>${x.rows}</td><td><button class="sec" data-n="${esc(x.name)}">استعادة</button></td></tr>`).join('')
+    : '<tr><td>لا توجد نسخ محفوظة بعد — تُنشأ تلقائياً أثناء استخدام البرنامج.</td></tr>';
+};
+$('#bkmClose').onclick = () => closeOv('#bkm');
+$('#bkmTb').onclick = async e => {
+  const b = e.target.closest('[data-n]'); if(!b) return;
+  let r; try{ r = await api('/api/session', {op:'restore', name:b.dataset.n}); }catch(e){ return toast('تعذّرت الاستعادة'); }
+  const d = r && r.data; if(!d || !Array.isArray(d.rows)) return toast('النسخة تالفة');
+  const old = rows;
+  rows = d.rows; seq = Math.max(seq, d.seq||0, ...rows.map(x => x.id||0));
+  closeOv('#bkm'); closeOv('#st'); render(); saveNow();
+  toast(`تمت استعادة ${rows.length} سيرفر`, '↩ تراجع', () => { rows = old; render(); saveNow(); }, 15000);
+};
 $('#sSave').onclick = async () => {
   const d = {timeout:+$('#sTmo').value||15, conc:+$('#sConc').value||8, per_domain:+$('#sDom').value||2, auto_hours:+$('#sAuto').value||0,
     deep_default:$('#sDeep').checked, count_default:$('#sCount').checked, adult_scan:$('#sAdult').checked, window_engine:$('#sEngine').value, ua_auto:$('#sUaAuto').checked, updates:$('#sUpd').checked, ext_player:$('#sPlayer').value,
@@ -4941,7 +4968,8 @@ function sessionData(){
 }
 let sessRev = null, sessStale = false;                       // null حتى تُستعاد الجلسة — يمنع حفظ قائمة فارغة فوق المحفوظة
 function saveSoon(){ clearTimeout(saveT); saveT = setTimeout(saveNow, 600); }
-function sessBody(){ return JSON.stringify({op:'save', rev:sessRev, data:sessionData()}); }
+const SESS_CID = Math.random().toString(36).slice(2) + Date.now().toString(36);   // معرّف هذه النافذة
+function sessBody(){ return JSON.stringify({op:'save', rev:sessRev, cid:SESS_CID, data:sessionData()}); }
 function onSaved(r){
   if(r && r.rev != null && r.ok) sessRev = r.rev;
   if(r && r.conflict && !sessStale){
@@ -4956,9 +4984,13 @@ function saveSync(){                                          // حفظ متزا
 function saveBeacon(){ if(sessRev === null || sessStale) return; try{ navigator.sendBeacon('/api/session?t='+window.__TOKEN__, new Blob([sessBody()], {type:'application/json'})); }catch(e){} }
 document.addEventListener('visibilitychange', () => { if(document.visibilityState==='hidden') saveBeacon(); });
 window.addEventListener('beforeunload', saveBeacon);
-async function saveNow(){
-  if(sessRev === null || sessStale) return;
-  try{ const s = JSON.stringify(sessionData()); if(s===lastSaved) return; lastSaved = s; onSaved(await api('/api/session', {op:'save', rev:sessRev, data:JSON.parse(s)})); }catch(e){}
+let saveChain = Promise.resolve();
+function saveNow(){                                           // الحفظات تُرسل واحداً تلو الآخر
+  saveChain = saveChain.then(async () => {
+    if(sessRev === null || sessStale) return;
+    try{ const s = JSON.stringify(sessionData()); if(s===lastSaved) return; lastSaved = s; onSaved(await api('/api/session', {op:'save', rev:sessRev, cid:SESS_CID, data:JSON.parse(s)})); }catch(e){}
+  });
+  return saveChain;
 }
 setInterval(() => { fetch('/api/ping', {method:'POST', headers:{'X-IPTV-Checker':'1'}, body:'{}'}).catch(()=>{}); }, 10000);
 window.addEventListener('pagehide', () => {
@@ -4974,7 +5006,11 @@ async function restoreSession(){
     if(Array.isArray(d.rows) && d.rows.length){
       rows = d.rows; seq = Math.max(d.seq||0, ...rows.map(x => x.id||0));
       if(d.sort) $('#sort').value = d.sort; if(d.filter) filter = d.filter;
-      toast(`تمت استعادة الجلسة السابقة (${rows.length} سيرفر)`, '🗑 ابدأ من جديد', () => { rows = []; render(); });
+      toast(`تمت استعادة الجلسة السابقة (${rows.length} سيرفر)`, '🗑 ابدأ من جديد', () => {
+        if(!confirm(`سيتم مسح كل السيرفرات (${rows.length}) من القائمة.\nيمكنك التراجع مباشرة بعدها، أو استعادتها لاحقاً من الإعدادات ← استعادة جلسة سابقة.\n\nهل تتابع؟`)) return;
+        const old = rows; rows = []; render(); saveNow();
+        toast('تم مسح القائمة', '↩ تراجع', () => { rows = old; render(); saveNow(); toast('تمت استعادة السيرفرات'); }, 15000);
+      });
     }
     if(d.text && !$('#inp').value) $('#inp').value = d.text;
     if(UI.chq) $('#chq').value = UI.chq;
@@ -4998,7 +5034,7 @@ document.addEventListener('keydown', e => {
     if($('#fmenu').classList.contains('on')) return closeFMenu();
     if($('#grpm').classList.contains('on')) return closeOv('#grpm');
     if($('#ov').classList.contains('on')) return pvClose();
-    for(const id of ['#grpm','#uam','#dt','#ad','#st','#lg','#chm']) if($(id).classList.contains('on')){ closeOv(id); return; }
+    for(const id of ['#bkm','#grpm','#uam','#dt','#ad','#st','#lg','#chm']) if($(id).classList.contains('on')){ closeOv(id); return; }
     return;
   }
   if((e.ctrlKey||e.metaKey) && e.key==='Enter' && !running){ e.preventDefault(); $('#btnGo').click(); return; }
@@ -5336,12 +5372,25 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     cur = None
                 cur_rev = int((cur or {}).get('rev') or 0)
-                if data.get('op') == 'save':
+                op = data.get('op')
+                if op == 'backups':
+                    return {'items': _sess_backups()}
+                if op == 'restore':
+                    name = os.path.basename(str(data.get('name') or ''))
+                    try:
+                        with open(os.path.join(_SESS_BAK_DIR, name), encoding='utf-8') as f:
+                            return {'data': json.load(f)}
+                    except Exception:
+                        return {'data': None}
+                if op == 'save':
                     d = data.get('data') or {}
-                    base = data.get('rev')
-                    if base is not None and int(base) < cur_rev:    # نافذة أقدم تحاول الحفظ فوق تعديل أحدث
+                    base, cid = data.get('rev'), str(data.get('cid') or '')
+                    # تعارض فقط إن كانت نافذة أخرى هي التي حفظت آخر مرة (حفظات النافذة نفسها تُقبل دائماً)
+                    if base is not None and int(base) < cur_rev and cid != str((cur or {}).get('cid') or ''):
                         return {'ok': False, 'conflict': True, 'rev': cur_rev}
+                    _sess_backup(cur, d)
                     d['rev'] = cur_rev + 1
+                    d['cid'] = cid
                     d['saved_at'] = int(time.time())
                     return {'ok': _write_json(_SESSION_PATH, d), 'rev': d['rev']}
                 return {'data': cur, 'rev': cur_rev}
@@ -5559,6 +5608,49 @@ def _find_chromium():
 
 _ALIVE = {'seen': 0.0, 'bye': 0.0}
 _SESS_LOCK = threading.Lock()
+_SESS_BAK_DIR = os.path.join(_DATA_DIR, 'sessions')
+_SESS_BAK_KEEP = 10
+
+
+def _sess_backups():
+    try:
+        names = sorted((n for n in os.listdir(_SESS_BAK_DIR) if n.startswith('session-') and n.endswith('.json')), reverse=True)
+    except Exception:
+        return []
+    out = []
+    for n in names:
+        try:
+            with open(os.path.join(_SESS_BAK_DIR, n), encoding='utf-8') as f:
+                d = json.load(f)
+            out.append({'name': n, 'time': int(d.get('saved_at') or os.path.getmtime(os.path.join(_SESS_BAK_DIR, n))),
+                        'rows': len(d.get('rows') or [])})
+        except Exception:
+            pass
+    return out
+
+
+def _sess_backup(old, new):
+    """نسخة من الجلسة السابقة قبل استبدالها: كل 10 دقائق، أو فوراً إذا نقص عدد السيرفرات (حذف أو مسح)."""
+    if not old or not (old.get('rows') or []):
+        return
+    try:
+        os.makedirs(_SESS_BAK_DIR, exist_ok=True)
+        items = _sess_backups()
+        last_t = items[0]['time'] if items else 0
+        shrink = len(new.get('rows') or []) < len(old.get('rows') or [])
+        if not shrink and time.time() - last_t < 600:
+            return
+        if items and items[0]['rows'] == len(old.get('rows') or []) and items[0]['time'] == int(old.get('saved_at') or 0):
+            return                                          # نفس النسخة محفوظة مسبقاً
+        name = 'session-' + time.strftime('%Y%m%d-%H%M%S', time.localtime(old.get('saved_at') or time.time())) + '.json'
+        _write_json(os.path.join(_SESS_BAK_DIR, name), old)
+        for it in _sess_backups()[_SESS_BAK_KEEP:]:
+            try:
+                os.remove(os.path.join(_SESS_BAK_DIR, it['name']))
+            except Exception:
+                pass
+    except Exception:
+        pass
 _WEBWIN = {'win': None}
 
 
