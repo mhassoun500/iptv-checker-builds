@@ -32,7 +32,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-VERSION = "6.9"
+VERSION = "7.0"
 UA = "VLC/3.0.20 LibVLC/3.0.20"
 DEFAULT_TIMEOUT = 15
 
@@ -447,6 +447,8 @@ def extract(text):
                 add(h, us, pw)                 # رابط كامل = سجل مستقل فوراً
             else:
                 bare_hosts.append(h)
+        if has_url:                            # الكلمات داخل الرابط نفسه (مثل my-server.com أو -domain) ليست تسميات
+            has_label = bool(RE_HOST.search(rest) or RE_USER.search(rest) or RE_PASS.search(rest))
         if not has_url:
             mh = RE_HOST.search(rest)
             if mh:
@@ -2512,13 +2514,22 @@ button:disabled{opacity:.45;cursor:default;filter:none}
 label.opt{display:flex;gap:6px;align-items:center;color:var(--mute)}
 input[type=number],input[type=search],input[type=text],select{background:#0a0e12;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:inherit}
 input[type=number]{width:66px}
-.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
-.stat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;cursor:pointer;text-align:center;user-select:none}
-.stat b{display:block;font-size:26px;margin-bottom:2px}
+.stats{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:clamp(4px,.6vw,10px)}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:clamp(5px,.7vw,12px) 4px;cursor:pointer;text-align:center;user-select:none;min-width:0;overflow:hidden}
+.stat .small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:clamp(10px,.8vw,13px)}
+.stat b{display:block;font-size:clamp(15px,1.7vw,26px);margin-bottom:2px}
 .stat.sel{outline:2px solid var(--acc)}
 .prog{height:6px;background:#0a0e12;border-radius:4px;overflow:hidden;margin-top:14px}
 .prog div{height:100%;width:0;background:var(--acc);transition:width .2s}
-.tw{overflow:auto;max-height:68vh;min-height:260px;border-radius:8px}
+.tw{overflow-y:auto;overflow-x:hidden;max-height:68vh;min-height:260px;border-radius:8px}
+table.tight th,table.tight td{padding:5px 4px}
+table.tight{font-size:12px}
+table.tight .icon{font-size:12px;padding:1px 2px}
+table.xtight .acts{white-space:normal;line-height:1.5}
+table.xtight .icon{font-size:11px;padding:0 1px}
+table.xtight .typesel{max-width:52px}
+td{overflow:hidden;text-overflow:ellipsis}
+.datain,.namein,.notein{min-width:0 !important;text-overflow:ellipsis}
 table{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed}
 th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:right;vertical-align:middle;word-break:break-word;overflow-wrap:anywhere}
 th{color:var(--mute);font-weight:600;position:sticky;top:0;background:var(--card);z-index:1}
@@ -2543,6 +2554,8 @@ tr.dragging{opacity:.4}
 tr.dragmate{opacity:.4}
 tr.bestrow td{background:#132617}
 tr.chrow td{background:#2b2108}
+tr.grph td{background:#1b1636;color:#ddd6fe;padding:6px 10px;border-top:2px solid #4c1d95}
+tr.grph button{padding:2px 10px;font-size:12px;margin-inline-start:6px}
 tr.hi td{background:#16325c !important;transition:background .3s}
 tr.chrow td:first-child{box-shadow:inset -4px 0 0 #f59e0b}
 #chbox{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#1a1606;border:1px solid #5b4a12;border-radius:10px;padding:8px 12px;margin-bottom:12px}
@@ -2563,10 +2576,10 @@ tr.drop-into td{box-shadow:inset 0 2px 0 var(--acc)}
 .ltr{direction:ltr;unicode-bidi:isolate;font-family:Consolas,"Courier New",monospace;word-break:break-all}
 .host{overflow-wrap:anywhere}
 .acts{white-space:nowrap}
-.namein{width:100%;min-width:70px;background:#0a0e12;border:1px solid var(--line);color:var(--text);border-radius:6px;padding:5px 7px;font-weight:600}
+.namein{width:100%;min-width:0;background:#0a0e12;border:1px solid var(--line);color:var(--text);border-radius:6px;padding:5px 7px;font-weight:600}
 .namein:hover{border-color:var(--mute)}
 .namein:focus{background:#0a0e12;border-color:var(--acc);outline:none}
-.datain{width:100%;min-width:80px;background:transparent;border:1px solid transparent;color:var(--text);border-radius:6px;padding:4px 6px;font:inherit;font-size:13px}
+.datain{width:100%;min-width:0;background:transparent;border:1px solid transparent;color:var(--text);border-radius:6px;padding:4px 6px;font:inherit;font-size:13px}
 .datain:hover{border-color:var(--line);background:#0a0e12}
 .datain:focus{background:#0a0e12;border-color:var(--acc);outline:none}
 td.hostcell{min-width:200px}
@@ -2585,7 +2598,7 @@ col.c-ping{width:6%} col.c-note{width:7%} col.c-name{width:13%} col.c-act{width:
 .icon{background:none;padding:1px 3px;color:var(--mute);font-size:14px}
 .icon:hover{background:#26313d}
 .note{white-space:normal;line-height:1.35;max-height:2.8em;overflow:hidden}
-#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#26313d;padding:10px 18px;border-radius:8px;opacity:0;transition:opacity .2s;pointer-events:none}
+#toast{z-index:300;position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#26313d;padding:10px 18px;border-radius:8px;opacity:0;transition:opacity .2s;pointer-events:none}
 #toast.on{opacity:1}
 body.drag main{outline:3px dashed var(--acc);outline-offset:-8px;border-radius:12px}
 .ov{position:fixed;inset:0;background:rgba(0,0,0,.72);display:none;align-items:center;justify-content:center;z-index:50;padding:14px}
@@ -2658,7 +2671,7 @@ body.nfs #pvVideo{width:100vw;height:100vh;max-height:100vh;border-radius:0}
 #ov .modal{height:96vh}
 #ov .mlist .chlist{flex:1;min-height:200px;max-height:none}
 body.compact #inCard{display:none}
-#uam,#chm{z-index:60}
+#uam,#chm,#grpm{z-index:60}
 @media(min-width:1900px){body{font-size:15px}table{font-size:14px}}
 @media(max-width:760px){.mbody{flex-direction:column}.mlist{max-width:none}.ov video{max-height:40vh}}
 </style>
@@ -2857,7 +2870,7 @@ http://example.com:8080/live/USER/PASS/12345.ts"></textarea>
           <button class="tab" data-k="res" title="نتائج البحث في محتوى السيرفرات">📋 النتائج</button>
         </div>
         <button class="sec" id="pvBack" style="display:none">↪ رجوع لقائمة المسلسلات</button>
-        <div class="row2"><input type="search" id="pvQ" placeholder="ابحث..."><button class="sec" id="pvRefresh" title="إعادة جلب القوائم من السيرفر">🔄</button></div>
+        <div class="row2"><input type="search" id="pvQ" placeholder="ابحث..."><button class="sec" id="pvRefresh" title="إعادة جلب القوائم من السيرفر">🔄</button><button class="sec" id="pvGroups" title="إظهار / إخفاء المجموعات">👁</button></div>
         <select id="pvCat"><option value="">كل التصنيفات</option></select>
         <div class="chlist" id="pvChs"><div id="pvSp"></div></div>
         <div class="small" id="pvEmpty"></div>
@@ -2867,6 +2880,19 @@ http://example.com:8080/live/USER/PASS/12345.ts"></textarea>
 </div>
 
 <div class="menu" id="fmenu"></div>
+
+<div class="ov" id="grpm"><div class="modal sm" style="max-width:560px">
+  <div class="mhead"><b>👁 إظهار / إخفاء المجموعات</b><span class="small" id="grpKind" style="flex:1"></span><button class="danger" id="grpClose">إغلاق ✕</button></div>
+  <div class="mpad">
+    <div class="tabs" id="grpTabs" style="margin-bottom:8px">
+      <button class="tab" data-k="live">📺 القنوات</button><button class="tab" data-k="vod">🎬 الأفلام</button><button class="tab" data-k="series">📂 المسلسلات</button>
+    </div>
+    <div class="row2"><input type="search" id="grpQ" placeholder="ابحث في المجموعات..."><button class="sec" id="grpAll">إظهار الكل</button><button class="sec" id="grpNone">إخفاء الكل</button></div>
+    <div class="small" id="grpInfo" style="margin:6px 0"></div>
+    <div class="chlist2" id="grpList" style="max-height:52vh;overflow:auto"></div>
+    <div class="row"><button id="grpSave">حفظ</button><span class="hint">تُحفظ لهذا السيرفر، وتُصدَّر إلى iptvnator.</span></div>
+  </div>
+</div></div>
 
 <div class="ov" id="uam"><div class="modal sm">
   <div class="mhead"><b>🪪 هوية المشغّل (User-Agent)</b><span class="small" id="uamFor" style="flex:1"></span><button class="danger" id="uamClose">إغلاق ✕</button></div>
@@ -2962,7 +2988,7 @@ const ST = {
   expired:['منتهي ⌛','s-expired'], invalid:['بيانات خاطئة','s-invalid'],
   blocked:['محظور / معطّل','s-invalid'], offline:['لا يستجيب ❌','s-offline'], error:['خطأ','s-offline']
 };
-const FILTERS = [['all','الإجمالي'],['ok','يعمل'],['expired','منتهي'],['bad','بيانات خاطئة / محظور'],['offline','لا يستجيب / خطأ'],['pending','لم يُفحص'],['viaproxy','تعمل عبر VPN'],['soon7','ينتهي ≤ 7 أيام'],['soon30','ينتهي ≤ 30 يوماً'],['chmatch','📺 يحتوي القنوات المطلوبة'],['adult','🔞 يحتوي محتوى للكبار']];
+const FILTERS = [['all','الإجمالي'],['ok','يعمل'],['expired','منتهي'],['bad','بيانات خاطئة / محظور'],['offline','لا يستجيب / خطأ'],['pending','لم يُفحص'],['viaproxy','تعمل عبر VPN'],['soon7','ينتهي ≤ 7 أيام'],['soon30','ينتهي ≤ 30 يوماً'],['chmatch','📺 يحتوي القنوات المطلوبة'],['adult','🔞 يحتوي محتوى للكبار'],['dups','🔁 السيرفرات المتشابهة']];
 const ORDER = {active:0,active_m3u:1,expired:2,blocked:3,invalid:4,offline:5,error:6,checking:7,pending:8};
 let rows = [], seq = 0, stop = false, running = false, filter = 'all', renderQueued = false;
 let SET = {per_domain:2, ffmpeg_path:'', ext_player:'auto', ext_player_path:'', ext_direct:false, updates:true, auto_hours:0, deep_default:false, count_default:false, timeout:15, conc:8};
@@ -3107,13 +3133,20 @@ function rowHtml(r, i){
 }
 function renderHead(){
   const cols = shownCols();
+  // كل الأعمدة تُوزَّع على عرض الشاشة بالضبط — بلا تمرير أفقي
   const FLEX = {host:3, user:1.2, pass:1.2, msg:1.8, note:1.1, name:1.4};
-  const fixed = cols.filter(c => !FLEX[c[0]]).reduce((a,c) => a + c[2], 0);
-  const flexW = cols.filter(c => FLEX[c[0]]).reduce((a,c) => a + FLEX[c[0]], 0);
-  const avail = Math.max(0, ($('.tw').clientWidth || window.innerWidth) - fixed - 4);
-  const minTotal = fixed + cols.filter(c => FLEX[c[0]]).reduce((a,c) => a + c[2], 0);
-  $('#cg').innerHTML = cols.map(c => `<col style="width:${FLEX[c[0]] ? Math.max(c[2], Math.floor(avail*FLEX[c[0]]/flexW)) : c[2]}px">`).join('');
-  $('#cg').closest('table').style.minWidth = minTotal + 'px';
+  const FMIN = {host:110, user:64, pass:64, msg:80, note:60, name:70};
+  const W = Math.max(320, ($('.tw').clientWidth || window.innerWidth) - 2);
+  const fixedCols = cols.filter(c => !FLEX[c[0]]), flexCols = cols.filter(c => FLEX[c[0]]);
+  const fixedSum = fixedCols.reduce((a,c) => a + c[2], 0);
+  const flexMin = flexCols.reduce((a,c) => a + FMIN[c[0]], 0), flexW = flexCols.reduce((a,c) => a + FLEX[c[0]], 0) || 1;
+  let k = 1;                                                        // معامل تصغير الأعمدة الثابتة عند ضيق الشاشة
+  if(fixedSum + flexMin > W) k = Math.max(0.55, (W - flexMin) / fixedSum);
+  const extra = Math.max(0, W - fixedSum*k - flexMin);
+  const wOf = c => FLEX[c[0]] ? FMIN[c[0]] + extra*FLEX[c[0]]/flexW : c[2]*k;
+  const total = cols.reduce((a,c) => a + wOf(c), 0), k2 = total > W ? W/total : 1;
+  $('#cg').innerHTML = cols.map(c => `<col style="width:${Math.floor(wOf(c)*k2)}px">`).join('');
+  const tb = $('#cg').closest('table'); tb.style.minWidth = ''; tb.classList.toggle('tight', k < 0.95 || k2 < 1); tb.classList.toggle('xtight', k < 0.75 || k2 < 0.95);
   const cf = UI.colf || {};
   $('#hr').innerHTML = cols.map(c => c[0]==='sel' ? '<th><input type="checkbox" id="selAll" title="تحديد الكل"></th>'
     : FCOL[c[0]] ? `<th title="${c[1]}"><div class="thf"><span>${c[1]}</span><button class="fbtn ${cf[c[0]]?'on':''}" data-fc="${c[0]}" title="فلتر العمود">▾</button></div></th>` : `<th>${c[1]}</th>`).join('');
@@ -3176,7 +3209,15 @@ document.addEventListener('click', closeFMenu);
 window.addEventListener('resize', closeFMenu);
 $('#clrF').onclick = () => { UI.colf = {}; render(); toast('تم مسح كل فلاتر الأعمدة'); };
 
-function visible(){ return sortList(baseList().filter(r => passCol(r, null))); }
+function visible(){
+  const list = sortList(baseList().filter(r => passCol(r, null)));
+  if(filter !== 'dups') return list;
+  // المتشابهة: كل مجموعة متتالية، والأفضل ⭐ أولاً ثم الأطول صلاحية
+  const order = [], groups = {};
+  list.forEach(r => { const g = keyHost(r.host); if(!groups[g]){ groups[g] = []; order.push(g); } groups[g].push(r); });
+  const dv = r => r.unlimited ? 1e9 : (r.days_left ?? -1e9);
+  return order.flatMap(g => groups[g].sort((a,b) => ((dupInfo[b.id]&&dupInfo[b.id].best?1:0) - (dupInfo[a.id]&&dupInfo[a.id].best?1:0)) || (dv(b)-dv(a))));
+}
 function baseList(){
   const q = $('#q').value.trim().toLowerCase();
   const fm = r => {
@@ -3184,6 +3225,7 @@ function baseList(){
     if(filter==='viaproxy') return !!r.viaProxy;
     if(filter==='chmatch') return !!(r.chs && r.chs.count>0);
     if(filter==='adult') return !!(r.adult && r.adult.adult);
+    if(filter==='dups') return !!dupInfo[r.id];
     if(filter==='soon7' || filter==='soon30'){ const n = filter==='soon7' ? 7 : 30; return grp(r.state)==='ok' && !r.unlimited && r.days_left!=null && r.days_left>=0 && r.days_left<=n; }
     return grp(r.state)===filter;
   };
@@ -3202,12 +3244,12 @@ function sortList(list){
 }
 const selected = () => rows.filter(r => r.sel);
 function renderStats(){
-  const c = {all:rows.length, ok:0, expired:0, bad:0, offline:0, pending:0, viaproxy:0, soon7:0, soon30:0, chmatch:0, adult:0};
-  rows.forEach(r => { c[grp(r.state)]++; if(r.viaProxy) c.viaproxy++; if(r.chs && r.chs.count>0) c.chmatch++; if(r.adult && r.adult.adult) c.adult++;
+  const c = {all:rows.length, ok:0, expired:0, bad:0, offline:0, pending:0, viaproxy:0, soon7:0, soon30:0, chmatch:0, adult:0, dups:0};
+  rows.forEach(r => { c[grp(r.state)]++; if(r.viaProxy) c.viaproxy++; if(r.chs && r.chs.count>0) c.chmatch++; if(r.adult && r.adult.adult) c.adult++; if(dupInfo[r.id]) c.dups++;
     if(grp(r.state)==='ok' && !r.unlimited && r.days_left!=null && r.days_left>=0){ if(r.days_left<=7) c.soon7++; if(r.days_left<=30) c.soon30++; } });
-  const col = {ok:'var(--ok)',expired:'var(--warn)',bad:'var(--bad)',offline:'var(--off)',pending:'var(--mute)',all:'var(--text)',viaproxy:'#6ee7b7',soon7:'var(--warn)',soon30:'var(--warn)',chmatch:'#fbbf24',adult:'#f87171'};
+  const col = {ok:'var(--ok)',expired:'var(--warn)',bad:'var(--bad)',offline:'var(--off)',pending:'var(--mute)',all:'var(--text)',viaproxy:'#6ee7b7',soon7:'var(--warn)',soon30:'var(--warn)',chmatch:'#fbbf24',adult:'#f87171',dups:'#c4b5fd'};
   const anyAdult = rows.some(r => r.adult && r.adult.adult);
-  $('#stats').innerHTML = FILTERS.filter(([k]) => (k!=='chmatch' || hasCh()) && (k!=='adult' || anyAdult)).map(([k,l]) => `<div class="stat ${filter===k?'sel':''}" data-f="${k}"><b style="color:${col[k]}">${c[k]}</b><span class="small">${l}</span></div>`).join('');
+  $('#stats').innerHTML = FILTERS.filter(([k]) => (k!=='chmatch' || hasCh()) && (k!=='adult' || anyAdult) && (k!=='dups' || c.dups>0)).map(([k,l]) => `<div class="stat ${filter===k?'sel':''}" data-f="${k}" title="${l}"><b style="color:${col[k]}">${c[k]}</b><span class="small">${l}</span></div>`).join('');
   const n = selected().length;
   $('#bulk').classList.toggle('on', n>0); $('#bulkN').textContent = n;
 }
@@ -3215,7 +3257,19 @@ function render(){
   computeDup();
   renderHead();
   const list = visible();
-  $('#tb').innerHTML = list.map(rowHtml).join('');
+  if(filter === 'dups'){                                   // عناوين المجموعات مع أزرار الاختيار السريع
+    const n = shownCols().length; let last = null, html = '';
+    list.forEach((r,i) => {
+      const g = keyHost(r.host);
+      if(g !== last){
+        last = g; const cnt = list.filter(x => keyHost(x.host)===g).length;
+        html += `<tr class="grph" data-g="${esc(g)}"><td colspan="${n}"><b class="ltr">🔁 ${esc(g.replace(/^https?:\/\//,''))}</b> <span class="small">(${cnt} حسابات)</span>
+          <button class="sec" data-gact="best">⭐ أبقِ الأفضل فقط</button><button class="sec" data-gact="sel">☑ أبقِ المحدد فقط</button><button class="sec" data-gact="check">🔁 افحص المجموعة</button></td></tr>`;
+      }
+      html += rowHtml(r, i);
+    });
+    $('#tb').innerHTML = html;
+  } else $('#tb').innerHTML = list.map(rowHtml).join('');
   const sa = $('#selAll'); if(sa){ sa.checked = list.length>0 && list.every(r=>r.sel); }
   $('#empty').style.display = rows.length ? (list.length ? 'none' : 'block') : 'block';
   if(rows.length && !list.length) $('#empty').textContent = 'لا توجد نتائج مطابقة للتصفية الحالية.';
@@ -3509,7 +3563,7 @@ $('#bkClear').onclick = () => { rows.forEach(r => r.sel=false); render(); };
 
 // ---------------- حفظ/استيراد المشروع ----------------
 const PROJ_FIELDS = ['host','username','password','type','portal','mac','isFull','m3uurl','rawM3u','m3uKind','title','userState','portalType','exportedId','autoRefresh','state','status','exp_ts','exp_date','days_left',
-  'unlimited','active_cons','max_cons','trial','created','channels','ping_ms','server_tz','message','m3u','viaProxy','proxyUsed','note','quality','kbps','deepMsg','ua','adult'];
+  'unlimited','active_cons','max_cons','trial','created','channels','ping_ms','server_tz','message','m3u','viaProxy','proxyUsed','note','quality','kbps','deepMsg','ua','adult','hiddenCats'];
 function exportProject(){
   if(!rows.length) return toast('لا توجد سيرفرات لحفظها');
   const payload = {app:'IPTV_Checker', format:1, exported_at:new Date().toISOString(), count:rows.length,
@@ -3567,7 +3621,17 @@ function exportIptvnator(sel){
     const base = (t==='m3u')
       ? {favorites:[], recentlyViewed:[], hiddenGroupTitles:[]}
       : {hiddenCategories:[], favorites:[], recentlyViewed:[], playbackPositions:[], sourcePins:[]};
-    return Object.assign(base, us);   // قيم المستخدم تبقى، والناقص يُملأ بمصفوفات فارغة
+    const out = Object.assign(base, us);   // قيم المستخدم تبقى، والناقص يُملأ بمصفوفات فارغة
+    if(r.hiddenCats){                       // المجموعات المخفية في برنامجنا ← صيغة iptvnator
+      if(t==='m3u') out.hiddenGroupTitles = (r.hiddenCats.live||[]).slice();
+      else {
+        const keep = (us.hiddenCategories||[]).filter(x => x && x.xtreamId == null);   // مدخلات قديمة بلا رقم — تبقى كما هي
+        const add = [];
+        [['live','live'],['vod','movies'],['series','series']].forEach(([k,ct]) => (r.hiddenCats[k]||[]).forEach(id => add.push({categoryType:ct, xtreamId: /^\d+$/.test(id) ? Number(id) : id})));
+        out.hiddenCategories = keep.concat(add);
+      }
+    }
+    return out;
   };
   const playlists = list.map((r,i) => {
     const t = r.type || r.portalType || 'xtream';
@@ -3714,7 +3778,7 @@ document.addEventListener('dragenter', e => { if([...e.dataTransfer.types].inclu
 document.addEventListener('dragleave', () => { if(--dragN <= 0){ dragN = 0; document.body.classList.remove('drag'); } });
 document.addEventListener('dragover', e => e.preventDefault());
 document.addEventListener('drop', e => { e.preventDefault(); dragN = 0; document.body.classList.remove('drag'); if(e.dataTransfer.files.length) loadFiles(e.dataTransfer.files); });
-$('#sort').onchange = render;
+$('#sort').onchange = () => { render(); saveNow(); };
 $('#q').oninput = scheduleRender;
 $('#stats').onclick = e => { const s = e.target.closest('.stat'); if(s){ filter = s.dataset.f; render(); } };
 
@@ -3762,6 +3826,18 @@ const sk = () => key(pv.r);
 const kindOf = it => (it && it.kind) || (pv.view==='episodes' ? 'series' : (pv.tab==='fav'||pv.tab==='recent') ? 'live' : pv.tab);
 const itemKey = it => it.ou || it.cmd || (kindOf(it)+':'+it.id);
 const tabKinds = () => ((pv.type==='xtream') ? ['live','vod','series','fav','recent','all'] : ['live','fav','recent']).concat(pv.results ? ['res'] : []);
+// المجموعات المخفية لكل سيرفر — تُقرأ أول مرة من userState القادم من iptvnator
+function hiddenOf(r){
+  if(!r) return {live:[], vod:[], series:[]};
+  if(!r.hiddenCats){
+    const h = {live:[], vod:[], series:[]}, us = r.userState || {}, KT = {live:'live', movies:'vod', movie:'vod', vod:'vod', series:'series'};
+    (us.hiddenCategories || []).forEach(x => { if(x && x.xtreamId != null && KT[x.categoryType]) h[KT[x.categoryType]].push(String(x.xtreamId)); });
+    (us.hiddenGroupTitles || []).forEach(t => { if(t) h.live.push(String(t)); });
+    r.hiddenCats = h;
+  }
+  return r.hiddenCats;
+}
+const hidSet = k => new Set((hiddenOf(pv && pv.r)[k]) || []);
 const jnorm = t => String(t||'').toLowerCase().replace(/[أإآ]/g,'ا').replace(/ة/g,'ه').replace(/ى/g,'ي').replace(/[^0-9a-z\u0621-\u064a]+/g,'');
 const isFolder = it => pv.view==='list' && (pv.tab==='series' || ((pv.tab==='all' || pv.tab==='res') && it.kind==='series'));
 
@@ -3902,7 +3978,8 @@ async function openPlayer(r, keep){
 function fillCats(keepName){
   const sel = $('#pvCat');
   const cats = (pv.data && pv.data[pv.tab] && pv.data[pv.tab].cats) || {};
-  sel.innerHTML = '<option value="">كل التصنيفات</option>' + Object.entries(cats).map(([id,n])=>`<option value="${esc(id)}">${esc(n||id)}</option>`).join('');
+  const hs = hidSet(pv.tab);
+  sel.innerHTML = '<option value="">كل التصنيفات</option>' + Object.entries(cats).filter(([id]) => !hs.has(String(id))).map(([id,n])=>`<option value="${esc(id)}">${esc(n||id)}</option>`).join('');
   sel.style.display = (pv.tab==='fav'||pv.tab==='recent'||pv.tab==='all'||pv.tab==='res'||pv.view==='episodes') ? 'none' : '';
   if(keepName){ const o = [...sel.options].find(o => o.textContent===keepName); if(o) sel.value = o.value; }
 }
@@ -3948,7 +4025,8 @@ function buildList(){
     if(qn.length >= 2){
       for(const [k, lbl] of [['live','📺 القنوات'],['vod','🎬 الأفلام'],['series','📂 المسلسلات']]){
         const d = pv.data[k]; if(!d || !d.items) continue;
-        const hits = d.items.filter(c => jnorm(c.name).includes(qn));
+        const hs = hidSet(k);
+        const hits = d.items.filter(c => !hs.has(String(c.cat)) && jnorm(c.name).includes(qn));
         if(!hits.length) continue;
         out.push({h:true, text:`${lbl} (${hits.length})`});
         hits.slice(0, 500).forEach(c => out.push({it:Object.assign({}, c, {kind:k})}));
@@ -3960,7 +4038,10 @@ function buildList(){
     drawVirtual(); return;
   }
   let items = curItems();
-  if(pv.view==='list' && (pv.tab==='live'||pv.tab==='vod'||pv.tab==='series') && cat) items = items.filter(c => String(c.cat)===cat);
+  if(pv.view==='list' && (pv.tab==='live'||pv.tab==='vod'||pv.tab==='series')){
+    const hs = hidSet(pv.tab); if(hs.size) items = items.filter(c => !hs.has(String(c.cat)));   // المجموعات المخفية
+    if(cat) items = items.filter(c => String(c.cat)===cat);
+  }
   if(q) items = items.filter(c => (c.name||'').toLowerCase().includes(q) || (qn && jnorm(c.name).includes(qn)));
   if(pv.view==='episodes'){
     let last = null;
@@ -4198,6 +4279,43 @@ function saveResume(it){
   if(v.currentTime > v.duration-30) delete UI.resume[k]; else UI.resume[k] = Math.floor(v.currentTime);
   saveSoon();
 }
+// ---------------- إظهار / إخفاء المجموعات ----------------
+let grpKind = 'live', grpState = null;
+async function openGroups(kind){
+  if(!pv || !pv.data) return toast('انتظر حتى تُحمَّل القوائم');
+  grpKind = (kind==='vod' || kind==='series') && pv.type==='xtream' ? kind : 'live';
+  [...$('#grpTabs').children].forEach(b => { b.classList.toggle('sel', b.dataset.k===grpKind); b.style.display = (b.dataset.k==='live' || pv.type==='xtream') ? '' : 'none'; });
+  $('#grpm').classList.add('on'); $('#grpList').innerHTML = '<div class="small">⏳ جاري التحميل...</div>';
+  if(grpKind !== 'live') await ensureLoaded(grpKind);
+  if(!pv) return;
+  const d = pv.data[grpKind] || {cats:{}, items:[]}, cnt = {};
+  (d.items||[]).forEach(c => { const k = String(c.cat); cnt[k] = (cnt[k]||0) + 1; });
+  const hs = hidSet(grpKind);
+  grpState = Object.entries(d.cats||{}).map(([id,n]) => ({id:String(id), name:n||id, n:cnt[String(id)]||0, on:!hs.has(String(id))}));
+  $('#grpQ').value = ''; drawGroups();
+}
+function drawGroups(){
+  const q = jnorm($('#grpQ').value);
+  const list = (grpState||[]).map((g,i) => [g,i]).filter(([g]) => !q || jnorm(g.name).includes(q));
+  const hidden = (grpState||[]).filter(g => !g.on).length;
+  $('#grpInfo').textContent = `${(grpState||[]).length} مجموعة — المخفية: ${hidden}`;
+  $('#grpList').innerHTML = list.map(([g,i]) => `<label class="it" style="cursor:pointer"><input type="checkbox" data-i="${i}" ${g.on?'checked':''}><span title="${esc(g.name)}">${esc(g.name)}</span><em>${g.n}</em></label>`).join('') || '<div class="small">لا توجد مجموعات</div>';
+}
+$('#pvGroups').onclick = () => openGroups(pv && pv.tab);
+$('#grpTabs').onclick = e => { const t = e.target.closest('.tab'); if(t) openGroups(t.dataset.k); };
+$('#grpQ').oninput = drawGroups;
+$('#grpList').onchange = e => { const c = e.target.closest('[data-i]'); if(c){ grpState[+c.dataset.i].on = c.checked; drawGroups(); } };
+$('#grpAll').onclick = () => { const q = jnorm($('#grpQ').value); (grpState||[]).forEach(g => { if(!q || jnorm(g.name).includes(q)) g.on = true; }); drawGroups(); };
+$('#grpNone').onclick = () => { const q = jnorm($('#grpQ').value); (grpState||[]).forEach(g => { if(!q || jnorm(g.name).includes(q)) g.on = false; }); drawGroups(); };
+$('#grpClose').onclick = () => closeOv('#grpm');
+$('#grpSave').onclick = () => {
+  if(!pv || !grpState) return;
+  const h = hiddenOf(pv.r); h[grpKind] = grpState.filter(g => !g.on).map(g => g.id);
+  closeOv('#grpm'); saveNow();
+  if(pv.tab===grpKind || pv.tab==='all'){ fillCats(); buildList(); }
+  toast(`تم الحفظ — ${h[grpKind].length} مجموعة مخفية`);
+};
+
 // ---- إحصاءات حية ----
 function statsTick(){
   if(!pv) return; const v = $('#pvVideo'), L = [];
@@ -4432,6 +4550,16 @@ $('#uaDetect').onclick = async () => {
 $('#tb').onclick = async e => {
   const cb = e.target.closest('.rsel');
   if(cb){ const r = rows.find(x => x.id === +cb.closest('tr').dataset.id); if(r){ r.sel = cb.checked; renderStats(); } return; }
+  const gb = e.target.closest('[data-gact]');
+  if(gb){
+    const g = gb.closest('tr').dataset.g, grpRows = rows.filter(r => keyHost(r.host)===g);
+    if(gb.dataset.gact==='check') return runChecks(grpRows);
+    let keep;
+    if(gb.dataset.gact==='best'){ keep = grpRows.filter(r => dupInfo[r.id] && dupInfo[r.id].best); if(!keep.length) return toast('لم يُحدد الأفضل بعد — افحص المجموعة أولاً'); }
+    else { keep = grpRows.filter(r => r.sel); if(!keep.length) return toast('حدّد الحساب الذي تريد إبقاءه في هذه المجموعة'); }
+    delRows(grpRows.filter(r => !keep.includes(r)).map(r => r.id));
+    return;
+  }
   const ub = e.target.closest('[data-act=unadult]');
   if(ub){ const r = rows.find(x => x.id === +ub.closest('tr').dataset.id); if(r) unAdult([r]); return; }
   const b = e.target.closest('button'); if(!b) return;
@@ -4490,7 +4618,7 @@ function moveBlock(ids, target){
   const anchor = rest[target];
   const at = anchor ? rows.indexOf(anchor) : rows.length;
   rows.splice(at, 0, ...block);
-  render();
+  render(); saveNow();
   flashRows(block.map(r => r.id));
 }
 function flashRows(ids){
@@ -4507,7 +4635,7 @@ function moveRow(id, dir){
   const compact = vis.filter(r => set.has(r.id)).every((r,k,a) => k===0 || vis.indexOf(r)===vis.indexOf(a[k-1])+1);
   moveBlock(ids, compact ? before + dir : before);                          // أول ضغطة تجمعها متتالية
 }
-$('#btnReverse').onclick = () => { if(!rows.length) return toast('لا توجد سيرفرات'); bakeOrder(); rows.reverse(); render(); msg('تم عكس الترتيب.'); };
+$('#btnReverse').onclick = () => { if(!rows.length) return toast('لا توجد سيرفرات'); bakeOrder(); rows.reverse(); render(); saveNow(); msg('تم عكس الترتيب.'); };
 function bestOf(list){
   const sv = r => r.unlimited ? 1e12 : (r.days_left!=null ? r.days_left : -1e12);
   const og = r => grp(r.state)==='ok' ? 0 : 1;
@@ -4588,7 +4716,7 @@ $('#tb').addEventListener('dragend', () => {
   }
   const pos = {}; order.forEach((id,i) => pos[id]=i);
   rows.sort((a,b) => (pos[a.id]??0) - (pos[b.id]??0));
-  render(); msg('تم إعادة الترتيب يدوياً.');
+  render(); saveNow(); msg('تم إعادة الترتيب يدوياً.');
 });
 
 // ---------------- نافذة التفاصيل ----------------
@@ -4738,18 +4866,36 @@ function sessionData(){
     rows: rows.map(r => { const o = Object.assign({}, r); delete o.deepBusy; delete o.sel; if(o.state==='checking') o.state='pending';
       if(o.chs){ o.chs = Object.assign({}, o.chs, {matches:(o.chs.matches||[]).slice(0,60)}); if(o.chs.busy) delete o.chs; } return o; })};
 }
-function saveSoon(){ clearTimeout(saveT); saveT = setTimeout(saveNow, 1500); }
+let sessRev = null, sessStale = false;                       // null حتى تُستعاد الجلسة — يمنع حفظ قائمة فارغة فوق المحفوظة
+function saveSoon(){ clearTimeout(saveT); saveT = setTimeout(saveNow, 600); }
+function sessBody(){ return JSON.stringify({op:'save', rev:sessRev, data:sessionData()}); }
+function onSaved(r){
+  if(r && r.rev != null && r.ok) sessRev = r.rev;
+  if(r && r.conflict && !sessStale){
+    sessStale = true;
+    toast('القائمة عُدّلت من نافذة أخرى للبرنامج — أعد التحميل لعرض أحدث نسخة', '🔄 إعادة التحميل', () => location.reload(), 30000);
+  }
+}
+function saveSync(){                                          // حفظ متزامن لحظة الإغلاق (تستدعيه النافذة المستقلة)
+  if(sessRev === null || sessStale) return 'skip';
+  try{ const x = new XMLHttpRequest(); x.open('POST', '/api/session', false); x.setRequestHeader('Content-Type','application/json'); x.setRequestHeader('X-IPTV-Checker','1'); x.send(sessBody()); onSaved(JSON.parse(x.responseText||'{}')); return 'ok'; }catch(e){ return 'err'; }
+}
+function saveBeacon(){ if(sessRev === null || sessStale) return; try{ navigator.sendBeacon('/api/session?t='+window.__TOKEN__, new Blob([sessBody()], {type:'application/json'})); }catch(e){} }
+document.addEventListener('visibilitychange', () => { if(document.visibilityState==='hidden') saveBeacon(); });
+window.addEventListener('beforeunload', saveBeacon);
 async function saveNow(){
-  try{ const s = JSON.stringify(sessionData()); if(s===lastSaved) return; lastSaved = s; await api('/api/session', {op:'save', data:JSON.parse(s)}); }catch(e){}
+  if(sessRev === null || sessStale) return;
+  try{ const s = JSON.stringify(sessionData()); if(s===lastSaved) return; lastSaved = s; onSaved(await api('/api/session', {op:'save', rev:sessRev, data:JSON.parse(s)})); }catch(e){}
 }
 setInterval(() => { fetch('/api/ping', {method:'POST', headers:{'X-IPTV-Checker':'1'}, body:'{}'}).catch(()=>{}); }, 10000);
 window.addEventListener('pagehide', () => {
-  try{ navigator.sendBeacon('/api/session?t='+window.__TOKEN__, new Blob([JSON.stringify({op:'save', data:sessionData()})], {type:'application/json'})); }catch(e){}
+  saveBeacon();
   try{ navigator.sendBeacon('/api/bye?t='+window.__TOKEN__, new Blob(['{}'], {type:'application/json'})); }catch(e){}
 });
 async function restoreSession(){
   try{
     const r = await api('/api/session', {});
+    sessRev = r.rev || 0;
     const d = r.data; if(!d) return;
     if(d.ui) UI = Object.assign(UI, d.ui, {hidden:Array.isArray(d.ui.hidden)?d.ui.hidden:UI.hidden});
     if(Array.isArray(d.rows) && d.rows.length){
@@ -4761,7 +4907,8 @@ async function restoreSession(){
     if(UI.chq) $('#chq').value = UI.chq;
     if(Array.isArray(UI.chKinds)){ $('#chkLive').checked = UI.chKinds.includes('live'); $('#chkVod').checked = UI.chKinds.includes('vod'); $('#chkSeries').checked = UI.chKinds.includes('series'); }
     renderChSaved();
-  }catch(e){}
+    setTimeout(() => { try{ lastSaved = JSON.stringify(sessionData()); }catch(e){} }, 0);   // لا تحفظ نسخة لم تتغير
+  }catch(e){ if(sessRev === null) sessRev = 0; }
 }
 
 // ---------------- فحص دوري تلقائي ----------------
@@ -4776,8 +4923,9 @@ document.addEventListener('keydown', e => {
   if(e.key==='Escape'){
     if(document.body.classList.contains('nfs')){ $('#pvFs').click(); return; }
     if($('#fmenu').classList.contains('on')) return closeFMenu();
+    if($('#grpm').classList.contains('on')) return closeOv('#grpm');
     if($('#ov').classList.contains('on')) return pvClose();
-    for(const id of ['#uam','#dt','#ad','#st','#lg','#chm']) if($(id).classList.contains('on')){ closeOv(id); return; }
+    for(const id of ['#grpm','#uam','#dt','#ad','#st','#lg','#chm']) if($(id).classList.contains('on')){ closeOv(id); return; }
     return;
   }
   if((e.ctrlKey||e.metaKey) && e.key==='Enter' && !running){ e.preventDefault(); $('#btnGo').click(); return; }
@@ -4793,7 +4941,7 @@ document.addEventListener('keydown', e => {
   else if(/^[1-9]$/.test(e.key)){ const items = pv.list.map((x,i)=>[x,i]).filter(([x])=>!x.h); const t = items[+e.key-1]; if(t) onItemClick(t[1]); }
 });
 
-$('#sort').onchange = render;
+$('#sort').onchange = () => { render(); saveNow(); };
 $('#q').oninput = scheduleRender;
 $('#stats').onclick = e => { const s = e.target.closest('.stat'); if(s){ filter = s.dataset.f; render(); } };
 ['#deep','#countch','#noport'].forEach(s => { const el = $(s); if(el) el.addEventListener('change', render); });
@@ -5013,6 +5161,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, '{}', 'application/json; charset=utf-8')
         if self.headers.get('X-IPTV-Checker') == '1':  # الإرسال عند الإغلاق (beacon) لا يُعدّ نشاطاً
             _touch()
+        if path == '/api/focus':                         # فتح البرنامج مرة ثانية: أظهر النافذة الحالية بدل نسخة جديدة
+            w = _WEBWIN.get('win')
+            if w is not None:
+                for fn in ('restore', 'show'):
+                    try:
+                        getattr(w, fn)()
+                    except Exception:
+                        pass
+                return self._send(200, '{"ok":true,"shown":true}', 'application/json; charset=utf-8')
+            return self._send(200, '{"ok":true,"shown":false}', 'application/json; charset=utf-8')
         if path == '/api/ping':
             return self._send(200, '{"ok":true}', 'application/json; charset=utf-8')
         op_ = _opener_for(str(data.get('proxy') or ''))
@@ -5098,13 +5256,22 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/update_status':
             return dict(_UPD)
         if path == '/api/session':
-            if data.get('op') == 'save':
-                return {'ok': _write_json(_SESSION_PATH, data.get('data') or {})}
-            try:
-                with open(_SESSION_PATH, encoding='utf-8') as f:
-                    return {'data': json.load(f)}
-            except Exception:
-                return {'data': None}
+            with _SESS_LOCK:
+                try:
+                    with open(_SESSION_PATH, encoding='utf-8') as f:
+                        cur = json.load(f)
+                except Exception:
+                    cur = None
+                cur_rev = int((cur or {}).get('rev') or 0)
+                if data.get('op') == 'save':
+                    d = data.get('data') or {}
+                    base = data.get('rev')
+                    if base is not None and int(base) < cur_rev:    # نافذة أقدم تحاول الحفظ فوق تعديل أحدث
+                        return {'ok': False, 'conflict': True, 'rev': cur_rev}
+                    d['rev'] = cur_rev + 1
+                    d['saved_at'] = int(time.time())
+                    return {'ok': _write_json(_SESSION_PATH, d), 'rev': d['rev']}
+                return {'data': cur, 'rev': cur_rev}
         if path == '/api/codec':
             src = sget('src')
             if not (src.startswith('/stream?') or src.startswith('/relay?')):
@@ -5225,6 +5392,9 @@ def main():
     args = [a for a in sys.argv[1:] if not a.startswith('-')]
     if args:
         return run_cli(args[0])
+    # نسخة واحدة فقط: إن كان البرنامج يعمل أصلاً، أظهر نافذته (أو افتح نافذة له) بدل تشغيل خادم ثانٍ
+    if '--new-instance' not in sys.argv and _focus_existing():
+        return
     threading.Thread(target=_hist_saver, daemon=True).start()
     srv = None
     for port in range(8765, 8800):
@@ -5315,6 +5485,8 @@ def _find_chromium():
 
 
 _ALIVE = {'seen': 0.0, 'bye': 0.0}
+_SESS_LOCK = threading.Lock()
+_WEBWIN = {'win': None}
 
 
 def _touch():
@@ -5397,11 +5569,56 @@ def _open_webview(url):
             webview.settings['OPEN_EXTERNAL_LINKS_IN_BROWSER'] = True
         except Exception:
             pass
+        _WEBWIN['win'] = api.win
+
+        def _on_closing():                              # احفظ القائمة قبل إغلاق النافذة
+            def go():
+                try:
+                    api.win.evaluate_js('typeof saveSync==="function" ? saveSync() : "none"')
+                except Exception:
+                    pass
+            t = threading.Thread(target=go, daemon=True)
+            t.start()
+            t.join(2.5)
+        try:
+            api.win.events.closing += _on_closing
+        except Exception:
+            pass
         webview.start(private_mode=False, storage_path=os.path.join(_DATA_DIR, 'webview'))
         return True
     except Exception as e:
         log_event('error', f'webview: {e}')
         return False
+
+
+def _focus_existing():
+    for port in range(8765, 8771):
+        url = f'http://127.0.0.1:{port}/'
+        try:
+            req = urllib.request.Request(url + 'api/focus', data=b'{}', method='POST',
+                                         headers={'X-IPTV-Checker': '1', 'Content-Type': 'application/json'})
+            with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req, timeout=0.6) as r:
+                j = json.loads(r.read().decode('utf-8', 'replace') or '{}')
+        except Exception:
+            continue
+        if not isinstance(j, dict) or not j.get('ok'):
+            continue
+        print(f'Mo IPTV Checker is already running: {url}')
+        if not j.get('shown'):                            # النسخة العاملة تستخدم كروم/المتصفح — افتح نافذة جديدة لها
+            chrome = _find_chromium()
+            try:
+                if chrome:
+                    import tempfile
+                    import subprocess
+                    subprocess.Popen([chrome, f'--app={url}',
+                                      f'--user-data-dir={os.path.join(tempfile.gettempdir(), "iptv_checker_profile")}'],
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                else:
+                    webbrowser.open(url)
+            except Exception:
+                webbrowser.open(url)
+        return True
+    return False
 
 
 def _open_chrome_app(url):

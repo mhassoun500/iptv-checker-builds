@@ -60,6 +60,12 @@ class TestExtract(unittest.TestCase):
         self.xt(r[1], 'http://b.com', 'u2', 'p2')
         self.assertEqual(r[2]['type'], 'stalker')
 
+    def test_hyphenated_host_single_line(self):
+        r = ex('http://my-server.com:8080 userx passx\nhttp://srv.example-long-domain.com:8080 userA passB')
+        self.assertEqual(len(r), 2)
+        self.xt(r[0], 'http://my-server.com:8080', 'userx', 'passx')
+        self.xt(r[1], 'http://srv.example-long-domain.com:8080', 'userA', 'passB')
+
     def test_empty_and_noise(self):
         self.assertEqual(ex(''), [])
         self.assertEqual(ex('مرحبا، لا توجد بيانات هنا'), [])
