@@ -32,7 +32,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-VERSION = "7.0"
+VERSION = "7.1"
 UA = "VLC/3.0.20 LibVLC/3.0.20"
 DEFAULT_TIMEOUT = 15
 
@@ -2736,6 +2736,7 @@ http://example.com:8080/live/USER/PASS/12345.ts"></textarea>
     <input type="file" id="img" accept="image/*" multiple hidden>
     <button class="sec" id="btnFile">📂 فتح ملف</button>
     <input type="file" id="file" accept=".txt,.m3u,.m3u8,.csv,.json,.xlsx,image/*" multiple hidden>
+    <button class="sec" id="btnPaste" title="لصق محتوى الحافظة في مساحة الإدخال">📋 لصق</button>
     <button class="sec" id="btnClearText">🧹 مسح الكتابة</button>
     <button class="sec" id="btnClear">🗑 مسح الكل</button>
     <span style="flex:1"></span>
@@ -2880,6 +2881,7 @@ http://example.com:8080/live/USER/PASS/12345.ts"></textarea>
 </div>
 
 <div class="menu" id="fmenu"></div>
+<div class="menu" id="ctxm" style="position:fixed;min-width:150px;z-index:400"></div>
 
 <div class="ov" id="grpm"><div class="modal sm" style="max-width:560px">
   <div class="mhead"><b>👁 إظهار / إخفاء المجموعات</b><span class="small" id="grpKind" style="flex:1"></span><button class="danger" id="grpClose">إغلاق ✕</button></div>
@@ -4279,6 +4281,61 @@ function saveResume(it){
   if(v.currentTime > v.duration-30) delete UI.resume[k]; else UI.resume[k] = Math.floor(v.currentTime);
   saveSoon();
 }
+// ---------------- لصق / نسخ في النافذة المستقلة (ماك) ----------------
+async function clipRead(){
+  if(NATIVE() && window.pywebview.api.clipboard_get){ try{ return await window.pywebview.api.clipboard_get(); }catch(e){} }
+  try{ return await navigator.clipboard.readText(); }catch(e){ return null; }
+}
+async function clipWrite(t){
+  if(NATIVE() && window.pywebview.api.clipboard_set){ try{ await window.pywebview.api.clipboard_set(t); return true; }catch(e){} }
+  try{ await navigator.clipboard.writeText(t); return true; }catch(e){ return false; }
+}
+function insertText(el, t){
+  if(!el || t == null) return;
+  el.focus();
+  const a = el.selectionStart ?? el.value.length, b = el.selectionEnd ?? el.value.length;
+  el.value = el.value.slice(0, a) + t + el.value.slice(b);
+  el.selectionStart = el.selectionEnd = a + t.length;
+  el.dispatchEvent(new Event('input', {bubbles:true}));
+}
+const isField = el => el && (el.tagName==='TEXTAREA' || (el.tagName==='INPUT' && /^(text|search|number|)$/i.test(el.type||'')));
+async function doPaste(el){
+  const t = await clipRead();
+  if(t == null) return toast('تعذّر الوصول للحافظة — استخدم ⌘V');
+  if(!t) return toast('الحافظة فارغة');
+  insertText(el, t);
+}
+$('#btnPaste').onclick = () => doPaste($('#inp'));
+// اختصارات ⌘V/⌘C/⌘X/⌘A تعمل مع لوحة المفاتيح العربية أيضاً (حسب موضع الزر لا الحرف)
+document.addEventListener('keydown', async e => {
+  if(!NATIVE() || !(e.metaKey || e.ctrlKey) || !isField(document.activeElement)) return;
+  const el = document.activeElement, sel = el.value.slice(el.selectionStart||0, el.selectionEnd||0);
+  if(e.code==='KeyV'){ e.preventDefault(); doPaste(el); }
+  else if(e.code==='KeyC' && sel){ e.preventDefault(); clipWrite(sel); }
+  else if(e.code==='KeyX' && sel){ e.preventDefault(); clipWrite(sel); insertText(el, ''); }
+  else if(e.code==='KeyA'){ e.preventDefault(); el.select(); }
+}, true);
+// قائمة الزر الأيمن داخل خانات الكتابة (النافذة المستقلة تخفي قائمة النظام)
+document.addEventListener('contextmenu', e => {
+  const el = e.target;
+  if(!isField(el) || !NATIVE()) return;
+  e.preventDefault();
+  const m = $('#ctxm'), sel = el.value.slice(el.selectionStart||0, el.selectionEnd||0);
+  m.innerHTML = `<button class="sec" data-c="paste" style="width:100%;margin:2px 0">📋 لصق</button>` +
+    (sel ? `<button class="sec" data-c="copy" style="width:100%;margin:2px 0">📄 نسخ</button><button class="sec" data-c="cut" style="width:100%;margin:2px 0">✂️ قص</button>` : '') +
+    `<button class="sec" data-c="all" style="width:100%;margin:2px 0">🔲 تحديد الكل</button>`;
+  m.style.left = Math.min(e.clientX, window.innerWidth - 170) + 'px'; m.style.top = Math.min(e.clientY, window.innerHeight - 160) + 'px';
+  m.classList.add('on');
+  m.onclick = ev => {
+    const c = ev.target.closest('[data-c]'); if(!c) return; m.classList.remove('on');
+    if(c.dataset.c==='paste') doPaste(el);
+    else if(c.dataset.c==='copy') clipWrite(sel);
+    else if(c.dataset.c==='cut'){ clipWrite(sel); insertText(el, ''); }
+    else { el.focus(); el.select(); }
+  };
+});
+document.addEventListener('click', e => { if(!e.target.closest('#ctxm')) $('#ctxm').classList.remove('on'); });
+
 // ---------------- إظهار / إخفاء المجموعات ----------------
 let grpKind = 'live', grpState = null;
 async function openGroups(kind){
@@ -5551,6 +5608,38 @@ class _WebApi:
         except Exception:
             pass
         return True
+
+    def clipboard_get(self):
+        """قراءة الحافظة من النظام (النافذة المستقلة لا تسمح للصفحة بقراءتها مباشرة)."""
+        try:
+            import AppKit
+            v = AppKit.NSPasteboard.generalPasteboard().stringForType_(AppKit.NSPasteboardTypeString)
+            return str(v or '')
+        except Exception:
+            pass
+        try:
+            import subprocess
+            return subprocess.run(['pbpaste'], capture_output=True, timeout=5,
+                                  env=dict(os.environ, LANG='en_US.UTF-8')).stdout.decode('utf-8', 'replace')
+        except Exception:
+            return ''
+
+    def clipboard_set(self, text):
+        try:
+            import AppKit
+            pb = AppKit.NSPasteboard.generalPasteboard()
+            pb.clearContents()
+            pb.setString_forType_(str(text or ''), AppKit.NSPasteboardTypeString)
+            return True
+        except Exception:
+            pass
+        try:
+            import subprocess
+            subprocess.run(['pbcopy'], input=str(text or '').encode('utf-8'), timeout=5,
+                           env=dict(os.environ, LANG='en_US.UTF-8'))
+            return True
+        except Exception:
+            return False
 
 
 def _open_webview(url):
