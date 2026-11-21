@@ -32,7 +32,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-VERSION = "7.1"
+VERSION = "7.2"
 UA = "VLC/3.0.20 LibVLC/3.0.20"
 DEFAULT_TIMEOUT = 15
 
@@ -2525,7 +2525,7 @@ input[type=number]{width:66px}
 table.tight th,table.tight td{padding:5px 4px}
 table.tight{font-size:12px}
 table.tight .icon{font-size:12px;padding:1px 2px}
-table.xtight .acts{white-space:normal;line-height:1.5}
+table.xtight .acts{line-height:1.5}
 table.xtight .icon{font-size:11px;padding:0 1px}
 table.xtight .typesel{max-width:52px}
 td{overflow:hidden;text-overflow:ellipsis}
@@ -2575,7 +2575,10 @@ tr.drop-into td{box-shadow:inset 0 2px 0 var(--acc)}
 .drag:active{cursor:grabbing}
 .ltr{direction:ltr;unicode-bidi:isolate;font-family:Consolas,"Courier New",monospace;word-break:break-all}
 .host{overflow-wrap:anywhere}
-.acts{white-space:nowrap}
+.acts{white-space:normal;overflow:visible !important;text-overflow:clip !important;line-height:1.6}
+.acts .icon{display:inline-block}
+table.tight .acts [data-act=up],table.tight .acts [data-act=down]{display:none}
+.acts [data-act=del]{color:#f87171}
 .namein{width:100%;min-width:0;background:#0a0e12;border:1px solid var(--line);color:var(--text);border-radius:6px;padding:5px 7px;font-weight:600}
 .namein:hover{border-color:var(--mute)}
 .namein:focus{background:#0a0e12;border-color:var(--acc);outline:none}
@@ -2626,6 +2629,8 @@ body.drag main{outline:3px dashed var(--acc);outline-offset:-8px;border-radius:1
 .vwrap:fullscreen video{max-height:100vh;height:100vh;border-radius:0}
 body.nfs #pvWrap{position:fixed;inset:0;z-index:100;border-radius:0}
 body.nfs #pvVideo{width:100vw;height:100vh;max-height:100vh;border-radius:0}
+.vfs{position:absolute;top:8px;left:8px;background:rgba(0,0,0,.55);color:#fff;border:1px solid rgba(255,255,255,.25);border-radius:8px;padding:4px 10px;font-size:18px;line-height:1;cursor:pointer;opacity:.35;transition:opacity .2s;z-index:5}
+.vwrap:hover .vfs,.vwrap:fullscreen .vfs,body.nfs .vfs{opacity:1}
 .pvstats{position:absolute;top:6px;right:6px;background:rgba(0,0,0,.68);color:#d1fae5;font:11px/1.5 Consolas,monospace;padding:6px 8px;border-radius:6px;display:none;direction:ltr;white-space:pre;pointer-events:none}
 .pvstats.on{display:block}
 .pvinfo{display:flex;gap:10px;align-items:flex-start;font-size:13px}
@@ -2856,6 +2861,7 @@ http://example.com:8080/live/USER/PASS/12345.ts"></textarea>
         <div class="vwrap" id="pvWrap">
           <video id="pvVideo" controls autoplay playsinline></video>
           <div class="pvstats" id="pvStats"></div>
+          <button class="vfs" id="pvFs2" title="ملء الشاشة (أو اضغط على الفيديو مرتين)">⛶</button>
         </div>
         <div class="small" id="pvMsg">اختر قناة من القائمة لبدء التشغيل. (↑↓ تبديل، مسافة إيقاف، F ملء الشاشة، M كتم، أرقام للقفز)</div>
         <div class="pvinfo" id="pvInfo"></div>
@@ -4396,12 +4402,22 @@ $('#pvCat').onchange = () => { if(pv){ $('#pvChs').scrollTop = 0; buildList(); }
 $('#pvChs').onclick = e => { const d = e.target.closest('.ch'); if(d && d.dataset.i!=null && pv) onItemClick(+d.dataset.i); };
 $('#pvFav').onclick = toggleFav;
 $('#pvTx').onclick = () => { if(!(pv && pv.cur)) return toast('اختر عنصراً أولاً'); pvStop(); pv.forceTx = !pv.forceTx; startAttempt(pv.cur); toast(pv.forceTx ? 'تحويل ffmpeg مفعّل' : 'تم إيقاف التحويل'); };
-$('#pvFs').onclick = () => {
+async function toggleFs(){
   const w = $('#pvWrap');
-  if(NATIVE() && !w.requestFullscreen){ document.body.classList.toggle('nfs'); window.pywebview.api.fullscreen(); return; }
-  try{ document.fullscreenElement ? document.exitFullscreen() : (w.requestFullscreen ? w.requestFullscreen() : $('#pvVideo').webkitEnterFullscreen()); }
-  catch(e){ if(NATIVE()){ document.body.classList.toggle('nfs'); window.pywebview.api.fullscreen(); } }
-};
+  if(document.body.classList.contains('nfs')){                 // الخروج من ملء الشاشة البديل
+    document.body.classList.remove('nfs'); if(NATIVE()) window.pywebview.api.fullscreen(); return;
+  }
+  if(document.fullscreenElement || document.webkitFullscreenElement){ (document.exitFullscreen || document.webkitExitFullscreen).call(document); return; }
+  try{
+    const req = w.requestFullscreen || w.webkitRequestFullscreen; if(!req) throw new Error('no fs');
+    await req.call(w);
+  }catch(e){                                                     // النافذة المستقلة: ملء شاشة للنافذة كلها + الفيديو يغطيها
+    document.body.classList.add('nfs'); if(NATIVE()) window.pywebview.api.fullscreen();
+  }
+}
+$('#pvFs').onclick = toggleFs;
+$('#pvFs2').onclick = e => { e.stopPropagation(); toggleFs(); };
+$('#pvWrap').addEventListener('dblclick', e => { e.preventDefault(); e.stopPropagation(); toggleFs(); });
 document.addEventListener('click', e => {
   const a = e.target.closest && e.target.closest('a[target=_blank]');
   if(a && NATIVE()){ e.preventDefault(); window.pywebview.api.open_url(a.href); }
