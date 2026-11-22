@@ -32,7 +32,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-VERSION = "7.5.2"
+VERSION = "7.5.3"
 UA = "VLC/3.0.20 LibVLC/3.0.20"
 DEFAULT_TIMEOUT = 15
 
@@ -2579,6 +2579,8 @@ tr.drop-into td{box-shadow:inset 0 2px 0 var(--acc)}
 .host{overflow-wrap:anywhere}
 .acts{white-space:normal;overflow:visible !important;text-overflow:clip !important;line-height:1.6}
 .acts .icon{display:inline-block}
+tr.currow td{background:#1e3a5f !important;box-shadow:inset 0 1px 0 var(--acc),inset 0 -1px 0 var(--acc)}
+tr.selrow td{background:#16273a}
 .acts .ar{display:flex;justify-content:flex-start;flex-wrap:nowrap;align-items:center}
 .acts .ar .icon{flex:none}
 .acts .icon[data-act=del]{color:#fff;background:#b91c1c;border-radius:5px;font-weight:700;padding:1px 7px;margin-inline-start:auto}
@@ -3147,14 +3149,14 @@ function cellHtml(c, r, i){
     case 'note': return `<td><input type="text" class="notein" data-id="${r.id}" value="${esc(r.note||'')}" placeholder="#وسم أو ملاحظة"></td>`;
     case 'msg': return `<td class="small note" title="${esc(r.message||'')}${r.scheme_note?' — '+esc(r.scheme_note):''}">${esc(r.message||'')}</td>`;
     case 'name': return `<td><input type="text" class="namein ltr" data-id="${r.id}" value="${esc(r.title || defaultName(r.host))}" placeholder="${esc(defaultName(r.host))}" title="اسم السيرفر عند التصدير إلى iptvnator"></td>`;
-    case 'acts': return `<td class="acts"><div class="ar"><button class="icon" data-act="play" title="تشغيل / معاينة">▶️</button><button class="icon" data-act="info" title="تفاصيل">🔍</button><button class="icon" data-act="copy" title="نسخ رابط M3U">📋</button><button class="icon" data-act="del" title="حذف السيرفر">✕</button></div><div class="ar"><button class="icon" data-act="re" title="إعادة الفحص">🔁</button><button class="icon" data-act="up" title="للأعلى">▲</button><button class="icon" data-act="down" title="للأسفل">▼</button></div></td>`;
+    case 'acts': return `<td class="acts"><div class="ar"><button class="icon" data-act="play" title="تشغيل / معاينة">▶️</button><button class="icon" data-act="info" title="تفاصيل">🔍</button><button class="icon" data-act="copy" title="نسخ رابط M3U">📋</button><button class="icon" data-act="del" title="حذف السيرفر">✕</button></div><div class="ar"><button class="icon" data-act="up" title="للأعلى">▲</button><button class="icon" data-act="down" title="للأسفل">▼</button><button class="icon" data-act="re" title="إعادة الفحص">🔁</button></div></td>`;
   }
   return '<td></td>';
 }
 function rowHtml(r, i){
   const di = dupInfo[r.id];
   const cols = shownCols();
-  return `<tr data-id="${r.id}" draggable="true" class="${di&&di.best?'bestrow':''} ${r.viaProxy?'viarow':''} ${r.chs&&r.chs.count>0?'chrow':''}">${cols.map(c => cellHtml(c[0], r, i)).join('')}</tr>`;
+  return `<tr data-id="${r.id}" draggable="true" class="${r.id===curRow?'currow':''} ${r.sel?'selrow':''} ${di&&di.best?'bestrow':''} ${r.viaProxy?'viarow':''} ${r.chs&&r.chs.count>0?'chrow':''}">${cols.map(c => cellHtml(c[0], r, i)).join('')}</tr>`;
 }
 function renderHead(){
   const cols = shownCols();
@@ -3278,6 +3280,7 @@ function renderStats(){
   const n = selected().length;
   $('#bulk').classList.toggle('on', n>0); $('#bulkN').textContent = n;
 }
+let curRow = null;   // السيرفر الذي يجري تحريكه — يبقى مميزاً ويتبعه العرض
 function render(){
   computeDup();
   renderHead();
@@ -4691,7 +4694,7 @@ $('#uaDetect').onclick = async () => {
 // ---------------- أحداث الجدول ----------------
 $('#tb').onclick = async e => {
   const cb = e.target.closest('.rsel');
-  if(cb){ const r = rows.find(x => x.id === +cb.closest('tr').dataset.id); if(r){ r.sel = cb.checked; renderStats(); } return; }
+  if(cb){ const r = rows.find(x => x.id === +cb.closest('tr').dataset.id); if(r){ r.sel = cb.checked; cb.closest('tr').classList.toggle('selrow', cb.checked); renderStats(); } return; }
   const gb = e.target.closest('[data-gact]');
   if(gb){
     const g = gb.closest('tr').dataset.g, grpRows = rows.filter(r => keyHost(r.host)===g);
@@ -4715,8 +4718,12 @@ $('#tb').onclick = async e => {
   else if(a==='copy'){ await copyText(m3uOf(r)); toast('تم نسخ رابط M3U'); }
   else if(a==='re') runChecks([r]);
   else if(a==='del') delRows([id]);
-  else if(a==='up') moveRow(id, -1);
-  else if(a==='down') moveRow(id, 1);
+  else if(a==='up' || a==='down'){
+    const tr0 = b.closest('tr'), y0 = tr0.getBoundingClientRect().top;
+    curRow = id; moveRow(id, a==='up' ? -1 : 1);
+    const tr1 = document.querySelector(`#tb tr[data-id="${id}"]`);
+    if(tr1){ const dy = tr1.getBoundingClientRect().top - y0; const sc = tr1.closest('.tw'); if(sc && sc.scrollHeight > sc.clientHeight + 2) sc.scrollTop += dy; else window.scrollBy(0, dy); }
+  }
 };
 // رقم الترتيب: يكتب المستخدم الموضع الجديد فيُنقل السيرفر إليه وتُرحَّل الباقية للأسفل
 const toLatin = v => String(v).replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d));
