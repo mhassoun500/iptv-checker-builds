@@ -32,7 +32,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-VERSION = "7.5"
+VERSION = "7.5.1"
 UA = "VLC/3.0.20 LibVLC/3.0.20"
 DEFAULT_TIMEOUT = 15
 
@@ -2579,8 +2579,9 @@ tr.drop-into td{box-shadow:inset 0 2px 0 var(--acc)}
 .host{overflow-wrap:anywhere}
 .acts{white-space:normal;overflow:visible !important;text-overflow:clip !important;line-height:1.6}
 .acts .icon{display:inline-block}
-.acts .ar{display:flex;justify-content:flex-start;flex-wrap:nowrap}
-.acts [data-act=del]{color:#f87171}
+.acts .ar{display:flex;justify-content:flex-start;flex-wrap:wrap}
+.acts .icon[data-act=del]{color:#fff;background:#b91c1c;border-radius:5px;font-weight:700;padding:1px 7px;margin-inline-start:3px}
+.acts .icon[data-act=del]:hover{background:#dc2626}
 .namein{width:100%;min-width:0;background:#0a0e12;border:1px solid var(--line);color:var(--text);border-radius:6px;padding:5px 7px;font-weight:600}
 .namein:hover{border-color:var(--mute)}
 .namein:focus{background:#0a0e12;border-color:var(--acc);outline:none}
@@ -3018,7 +3019,7 @@ let UI = {hidden:['conn','msg'], vol:1, favs:{}, recents:{}, resume:{}, lastAuto
 const COLS = [
   ['sel','☑',34,false],['n','#',76,false],['st','الحالة',106,false],['host','السيرفر',170,false],['user','المستخدم',90,true],['pass','كلمة المرور',90,true],
   ['exp','الانتهاء',96,true],['days','الأيام',88,true],['conn','الاتصالات',80,true],['ping','الاستجابة',90,true],['q','الجودة',88,true],['score','التقييم',78,true],
-  ['chs','القنوات المطابقة',110,true],['note','وسوم / ملاحظة',90,true],['msg','ملاحظات الفحص',110,true],['name','الاسم في iptvnator',100,true],['acts','',140,false]
+  ['chs','القنوات المطابقة',110,true],['note','وسوم / ملاحظة',90,true],['msg','ملاحظات الفحص',110,true],['name','الاسم في iptvnator',100,true],['acts','',150,false]
 ];
 const COLNAME = {chs:'القنوات المطابقة',user:'المستخدم',pass:'كلمة المرور',exp:'تاريخ الانتهاء',days:'الأيام المتبقية',conn:'الاتصالات',ping:'الاستجابة',q:'جودة البث',score:'التقييم',note:'وسوم / ملاحظة',msg:'ملاحظات الفحص',name:'الاسم في iptvnator'};
 const hasCh = () => rows.some(r => r.chs);
@@ -3145,7 +3146,7 @@ function cellHtml(c, r, i){
     case 'note': return `<td><input type="text" class="notein" data-id="${r.id}" value="${esc(r.note||'')}" placeholder="#وسم أو ملاحظة"></td>`;
     case 'msg': return `<td class="small note" title="${esc(r.message||'')}${r.scheme_note?' — '+esc(r.scheme_note):''}">${esc(r.message||'')}</td>`;
     case 'name': return `<td><input type="text" class="namein ltr" data-id="${r.id}" value="${esc(r.title || defaultName(r.host))}" placeholder="${esc(defaultName(r.host))}" title="اسم السيرفر عند التصدير إلى iptvnator"></td>`;
-    case 'acts': return `<td class="acts"><div class="ar"><button class="icon" data-act="play" title="تشغيل / معاينة">▶️</button><button class="icon" data-act="info" title="تفاصيل">🔍</button><button class="icon" data-act="copy" title="نسخ رابط M3U">📋</button><button class="icon" data-act="re" title="إعادة الفحص">🔁</button><button class="icon" data-act="del" title="حذف">✕</button></div><div class="ar"><button class="icon" data-act="up" title="للأعلى">▲</button><button class="icon" data-act="down" title="للأسفل">▼</button></div></td>`;
+    case 'acts': return `<td class="acts"><div class="ar"><button class="icon" data-act="play" title="تشغيل / معاينة">▶️</button><button class="icon" data-act="info" title="تفاصيل">🔍</button><button class="icon" data-act="copy" title="نسخ رابط M3U">📋</button><button class="icon" data-act="del" title="حذف السيرفر">✕</button></div><div class="ar"><button class="icon" data-act="re" title="إعادة الفحص">🔁</button><button class="icon" data-act="up" title="للأعلى">▲</button><button class="icon" data-act="down" title="للأسفل">▼</button></div></td>`;
   }
   return '<td></td>';
 }
