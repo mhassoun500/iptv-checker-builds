@@ -32,7 +32,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-VERSION = "7.4"
+VERSION = "7.5"
 UA = "VLC/3.0.20 LibVLC/3.0.20"
 DEFAULT_TIMEOUT = 15
 
@@ -145,7 +145,7 @@ def save_cfg(d):
 
 DEFAULT_SETTINGS = {'per_domain': 2, 'ffmpeg_path': '', 'ext_player': 'auto', 'ext_player_path': '',
                     'ext_direct': False, 'updates': True, 'auto_hours': 0, 'deep_default': False,
-                    'count_default': False, 'timeout': 15, 'conc': 8, 'adult_scan': True, 'ua_auto': True, 'window_engine': 'auto'}
+                    'count_default': False, 'timeout': 15, 'conc': 8, 'adult_scan': True, 'ua_auto': True, 'window_engine': 'auto', 'noport': True}
 
 
 def get_settings():
@@ -2579,7 +2579,7 @@ tr.drop-into td{box-shadow:inset 0 2px 0 var(--acc)}
 .host{overflow-wrap:anywhere}
 .acts{white-space:normal;overflow:visible !important;text-overflow:clip !important;line-height:1.6}
 .acts .icon{display:inline-block}
-table.tight .acts [data-act=up],table.tight .acts [data-act=down]{display:none}
+.acts .ar{display:flex;justify-content:flex-start;flex-wrap:nowrap}
 .acts [data-act=del]{color:#f87171}
 .namein{width:100%;min-width:0;background:#0a0e12;border:1px solid var(--line);color:var(--text);border-radius:6px;padding:5px 7px;font-weight:600}
 .namein:hover{border-color:var(--mute)}
@@ -2748,9 +2748,8 @@ http://example.com:8080/live/USER/PASS/12345.ts"></textarea>
     <button class="sec" id="btnClearText" title="مسح النص فقط — الجدول يبقى">🧹 مسح النص</button>
     <button class="sec" id="btnClear" title="مسح كل السيرفرات والنص">🗑 مسح الكل</button>
   </div>
-  <input type="hidden" id="conc" value="8"><input type="hidden" id="tmo" value="15">
+  <input type="checkbox" id="noport" checked hidden><input type="hidden" id="conc" value="8"><input type="hidden" id="tmo" value="15">
   <div class="row optrow">
-    <label class="opt"><input type="checkbox" id="noport" checked> تجاهل المنفذ (بعد :) عند حذف المكرر</label>
     <label class="opt"><input type="checkbox" id="retryproxy"> أعد تجربة غير العاملة عبر VPN أمريكي</label>
     <label class="opt" title="يجرّب بث 2-3 قنوات فعلياً ويقيس الجودة (أبطأ)"><input type="checkbox" id="deep"> فحص بث فعلي (عميق)</label>
     <label class="opt"><input type="checkbox" id="countch"> عدّ القنوات</label>
@@ -2972,6 +2971,7 @@ http://example.com:8080/live/USER/PASS/12345.ts"></textarea>
     </div>
     <label class="opt"><input type="checkbox" id="sDeep"> تفعيل الفحص العميق افتراضياً</label>
     <label class="opt"><input type="checkbox" id="sCount"> تفعيل عدّ القنوات افتراضياً</label>
+    <label class="opt"><input type="checkbox" id="sNoport"> تجاهل المنفذ (بعد :) عند حذف المكرر</label>
     <label class="opt"><input type="checkbox" id="sUaAuto"> عند رفض السيرفر للاتصال: جرّب هويات مشغّل أخرى تلقائياً واحفظ الناجحة</label>
     <label class="opt"><input type="checkbox" id="sAdult"> تمييز السيرفرات التي تحتوي محتوى للكبار 🔞 (يفحص أسماء التصنيفات بعد كل فحص)</label>
     <label class="opt"><input type="checkbox" id="sUpd"> التحقق من وجود تحديثات عند التشغيل</label>
@@ -3018,7 +3018,7 @@ let UI = {hidden:['conn','msg'], vol:1, favs:{}, recents:{}, resume:{}, lastAuto
 const COLS = [
   ['sel','☑',34,false],['n','#',76,false],['st','الحالة',106,false],['host','السيرفر',170,false],['user','المستخدم',90,true],['pass','كلمة المرور',90,true],
   ['exp','الانتهاء',96,true],['days','الأيام',88,true],['conn','الاتصالات',80,true],['ping','الاستجابة',90,true],['q','الجودة',88,true],['score','التقييم',78,true],
-  ['chs','القنوات المطابقة',110,true],['note','وسوم / ملاحظة',90,true],['msg','ملاحظات الفحص',110,true],['name','الاسم في iptvnator',100,true],['acts','',176,false]
+  ['chs','القنوات المطابقة',110,true],['note','وسوم / ملاحظة',90,true],['msg','ملاحظات الفحص',110,true],['name','الاسم في iptvnator',100,true],['acts','',140,false]
 ];
 const COLNAME = {chs:'القنوات المطابقة',user:'المستخدم',pass:'كلمة المرور',exp:'تاريخ الانتهاء',days:'الأيام المتبقية',conn:'الاتصالات',ping:'الاستجابة',q:'جودة البث',score:'التقييم',note:'وسوم / ملاحظة',msg:'ملاحظات الفحص',name:'الاسم في iptvnator'};
 const hasCh = () => rows.some(r => r.chs);
@@ -3145,7 +3145,7 @@ function cellHtml(c, r, i){
     case 'note': return `<td><input type="text" class="notein" data-id="${r.id}" value="${esc(r.note||'')}" placeholder="#وسم أو ملاحظة"></td>`;
     case 'msg': return `<td class="small note" title="${esc(r.message||'')}${r.scheme_note?' — '+esc(r.scheme_note):''}">${esc(r.message||'')}</td>`;
     case 'name': return `<td><input type="text" class="namein ltr" data-id="${r.id}" value="${esc(r.title || defaultName(r.host))}" placeholder="${esc(defaultName(r.host))}" title="اسم السيرفر عند التصدير إلى iptvnator"></td>`;
-    case 'acts': return `<td class="acts"><button class="icon" data-act="up" title="للأعلى">▲</button><button class="icon" data-act="down" title="للأسفل">▼</button><button class="icon" data-act="play" title="تشغيل / معاينة">▶️</button><button class="icon" data-act="info" title="تفاصيل">🔍</button><button class="icon" data-act="copy" title="نسخ رابط M3U">📋</button><button class="icon" data-act="re" title="إعادة الفحص">🔁</button><button class="icon" data-act="del" title="حذف">✕</button></td>`;
+    case 'acts': return `<td class="acts"><div class="ar"><button class="icon" data-act="play" title="تشغيل / معاينة">▶️</button><button class="icon" data-act="info" title="تفاصيل">🔍</button><button class="icon" data-act="copy" title="نسخ رابط M3U">📋</button><button class="icon" data-act="re" title="إعادة الفحص">🔁</button><button class="icon" data-act="del" title="حذف">✕</button></div><div class="ar"><button class="icon" data-act="up" title="للأعلى">▲</button><button class="icon" data-act="down" title="للأسفل">▼</button></div></td>`;
   }
   return '<td></td>';
 }
@@ -4946,10 +4946,11 @@ async function loadSettings(){
   if(SET.conc) $('#conc').value = SET.conc;
   if(SET.deep_default) $('#deep').checked = true;
   if(SET.count_default) $('#countch').checked = true;
+  $('#noport').checked = SET.noport!==false;
 }
 function fillSettings(){
   $('#sTmo').value = SET.timeout; $('#sConc').value = SET.conc; $('#sDom').value = SET.per_domain; $('#sAuto').value = SET.auto_hours;
-  $('#sDeep').checked = !!SET.deep_default; $('#sCount').checked = !!SET.count_default; $('#sAdult').checked = SET.adult_scan!==false; $('#sEngine').value = SET.window_engine || 'auto'; $('#sUaAuto').checked = SET.ua_auto!==false; $('#sUpd').checked = SET.updates!==false;
+  $('#sDeep').checked = !!SET.deep_default; $('#sCount').checked = !!SET.count_default; $('#sNoport').checked = SET.noport!==false; $('#sAdult').checked = SET.adult_scan!==false; $('#sEngine').value = SET.window_engine || 'auto'; $('#sUaAuto').checked = SET.ua_auto!==false; $('#sUpd').checked = SET.updates!==false;
   $('#sPlayer').value = SET.ext_player || 'auto'; $('#sPlayerPath').value = SET.ext_player_path || ''; $('#sDirect').checked = !!SET.ext_direct; $('#sFfmpeg').value = SET.ffmpeg_path || '';
   const f = (n,p) => `${n}: ${p ? '✅' : '—'}`;
   $('#sCaps').textContent = `الأدوات المكتشفة — ${f('ffmpeg',CAPS.ffmpeg)} | ${f('VLC',CAPS.vlc)} | ${f('mpv',CAPS.mpv)}${CAPS.iina!==undefined&&CAPS.platform==='darwin'?' | '+f('IINA',CAPS.iina):''}${CAPS.platform&&CAPS.platform.startsWith('win')?' | '+f('PotPlayer',CAPS.potplayer):''}`;
@@ -4978,10 +4979,10 @@ $('#bkmTb').onclick = async e => {
 };
 $('#sSave').onclick = async () => {
   const d = {timeout:+$('#sTmo').value||15, conc:+$('#sConc').value||8, per_domain:+$('#sDom').value||2, auto_hours:+$('#sAuto').value||0,
-    deep_default:$('#sDeep').checked, count_default:$('#sCount').checked, adult_scan:$('#sAdult').checked, window_engine:$('#sEngine').value, ua_auto:$('#sUaAuto').checked, updates:$('#sUpd').checked, ext_player:$('#sPlayer').value,
+    deep_default:$('#sDeep').checked, count_default:$('#sCount').checked, noport:$('#sNoport').checked, adult_scan:$('#sAdult').checked, window_engine:$('#sEngine').value, ua_auto:$('#sUaAuto').checked, updates:$('#sUpd').checked, ext_player:$('#sPlayer').value,
     ext_player_path:$('#sPlayerPath').value.trim(), ext_direct:$('#sDirect').checked, ffmpeg_path:$('#sFfmpeg').value.trim()};
   try{ const r = await api('/api/settings', {op:'set', data:d}); SET = Object.assign(SET, r.settings||d); CAPS = r.caps||CAPS; }catch(e){ return toast('تعذر الحفظ'); }
-  $('#tmo').value = SET.timeout; $('#conc').value = SET.conc; closeOv('#st'); toast('تم حفظ الإعدادات');
+  $('#tmo').value = SET.timeout; $('#conc').value = SET.conc; $('#noport').checked = SET.noport!==false; render(); closeOv('#st'); toast('تم حفظ الإعدادات');
 };
 async function showLog(clear){
   $('#lg').classList.add('on');
