@@ -32,7 +32,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-VERSION = "7.5.1"
+VERSION = "7.5.2"
 UA = "VLC/3.0.20 LibVLC/3.0.20"
 DEFAULT_TIMEOUT = 15
 
@@ -2579,8 +2579,9 @@ tr.drop-into td{box-shadow:inset 0 2px 0 var(--acc)}
 .host{overflow-wrap:anywhere}
 .acts{white-space:normal;overflow:visible !important;text-overflow:clip !important;line-height:1.6}
 .acts .icon{display:inline-block}
-.acts .ar{display:flex;justify-content:flex-start;flex-wrap:wrap}
-.acts .icon[data-act=del]{color:#fff;background:#b91c1c;border-radius:5px;font-weight:700;padding:1px 7px;margin-inline-start:3px}
+.acts .ar{display:flex;justify-content:flex-start;flex-wrap:nowrap;align-items:center}
+.acts .ar .icon{flex:none}
+.acts .icon[data-act=del]{color:#fff;background:#b91c1c;border-radius:5px;font-weight:700;padding:1px 7px;margin-inline-start:auto}
 .acts .icon[data-act=del]:hover{background:#dc2626}
 .namein{width:100%;min-width:0;background:#0a0e12;border:1px solid var(--line);color:var(--text);border-radius:6px;padding:5px 7px;font-weight:600}
 .namein:hover{border-color:var(--mute)}
@@ -5827,7 +5828,7 @@ def _open_webview(url):
         api = _WebApi()
         api.win = webview.create_window(f'Mo IPTV Checker {VERSION}', url, js_api=api,
                                         width=1360, height=880, min_size=(900, 600),
-                                        background_color='#0f1419')
+                                        background_color='#0e1318')
         try:
             webview.settings['OPEN_EXTERNAL_LINKS_IN_BROWSER'] = True
         except Exception:
@@ -5845,6 +5846,29 @@ def _open_webview(url):
             t.join(2.5)
         try:
             api.win.events.closing += _on_closing
+        except Exception:
+            pass
+
+        def _mac_titlebar():                            # ماك: شريط عنوان بلون البرنامج وبدون نص
+            if sys.platform != 'darwin':
+                return
+            try:
+                from AppKit import NSApp, NSColor
+                from PyObjCTools import AppHelper
+
+                def go():
+                    for w in NSApp.windows():
+                        try:
+                            w.setTitlebarAppearsTransparent_(True)
+                            w.setTitleVisibility_(1)    # NSWindowTitleHidden
+                            w.setBackgroundColor_(NSColor.colorWithSRGBRed_green_blue_alpha_(14/255, 19/255, 24/255, 1.0))
+                        except Exception:
+                            pass
+                AppHelper.callAfter(go)
+            except Exception:
+                pass
+        try:
+            api.win.events.shown += _mac_titlebar
         except Exception:
             pass
         webview.start(private_mode=False, storage_path=os.path.join(_DATA_DIR, 'webview'))
