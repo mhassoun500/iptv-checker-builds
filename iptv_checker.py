@@ -32,7 +32,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-VERSION = "7.3"
+VERSION = "7.4"
 UA = "VLC/3.0.20 LibVLC/3.0.20"
 DEFAULT_TIMEOUT = 15
 
@@ -2396,7 +2396,9 @@ def update_apply():
 
 # ---------------- مكتبات المشغّل محلياً ----------------
 _LIBS = {'mpegts.js': 'https://cdn.jsdelivr.net/npm/mpegts.js@1.7.3/dist/mpegts.js',
-         'hls.js': 'https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js'}
+         'hls.js': 'https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js',
+         'pdf.js': 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/legacy/build/pdf.min.js',
+         'pdf.worker.js': 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/legacy/build/pdf.worker.min.js'}
 
 
 def get_lib(name):
@@ -2652,6 +2654,9 @@ body.nfs #pvVideo{width:100vw;height:100vh;max-height:100vh;border-radius:0}
 .ordin{width:38px;padding:2px 3px;text-align:center;font-size:12px;margin-inline-start:3px;background:#0a0e12;border:1px solid var(--line);border-radius:5px;color:var(--text)}
 .ordin:focus{border-color:var(--acc);outline:none}
 .adb{cursor:pointer;display:inline-block;background:#4c1414;color:#fecaca;border:1px solid #991b1b;border-radius:6px;padding:0 4px;font-size:11px;margin-inline-end:3px;cursor:help}
+.btnrow{display:flex;gap:clamp(4px,.5vw,8px);margin-top:10px;flex-wrap:nowrap}
+.btnrow button{flex:1 1 0;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:clamp(6px,.6vw,10px) clamp(4px,.6vw,14px);font-size:clamp(11px,.85vw,14px)}
+.optrow{margin-top:8px}
 .tagb{display:inline-block;background:#2a2147;color:#c4b5fd;border-radius:6px;padding:0 5px;font-size:11px;margin-inline-start:4px}
 .menu{position:absolute;z-index:40;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 10px;display:none;min-width:180px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
 .menu.on{display:block}
@@ -2721,9 +2726,9 @@ body.compact #inCard{display:none}
     ، روابط القنوات، أو نصوص تحتوي على
     <span class="ltr">Host / User / Pass</span>
     — الأداة تستخرج البيانات وتحذف المكرر تلقائياً.
-    <br>📷 ويمكنك أيضاً لصق صورة
+    <br>📂 ويمكنك أيضاً لصق صورة
     (<span class="ltr">Ctrl+V</span> / <span class="ltr">⌘+V</span>)
-    أو سحبها إلى هنا، أو اختيارها من زر «قراءة من صورة».
+    أو سحب صور وملفات (نصية أو PDF أو إكسل) إلى هنا، أو اختيارها من زر «فتح ملف».
   </div>
   <textarea id="inp" spellcheck="false" placeholder="http://example.com:8080/get.php?username=USER&password=PASS&type=m3u_plus
 
@@ -2732,22 +2737,19 @@ Username: USER
 Password: PASS
 
 http://example.com:8080/live/USER/PASS/12345.ts"></textarea>
-  <div class="row">
-    <button id="btnGo">🔍 استخراج وفحص المكتوب</button>
-    <button class="sec" id="btnExtract">استخراج فقط</button>
-    <button id="btnCheckAll">✅ اختبار كل السيرفرات</button>
+  <div class="btnrow">
+    <button id="btnGo" title="استخراج السيرفرات من النص وفحصها">🔍 استخرج وافحص</button>
+    <button class="sec" id="btnExtract" title="استخراج السيرفرات من النص بدون فحص">استخرج</button>
+    <button id="btnCheckAll" title="فحص كل السيرفرات في الجدول">✅ افحص الكل</button>
     <button class="danger" id="btnStop" disabled>⏹ إيقاف</button>
-    <button class="sec" id="btnImg">📷 قراءة من صورة</button>
-    <input type="file" id="img" accept="image/*" multiple hidden>
-    <button class="sec" id="btnFile">📂 فتح ملف</button>
-    <input type="file" id="file" accept=".txt,.m3u,.m3u8,.csv,.json,.xlsx,image/*" multiple hidden>
+    <button class="sec" id="btnFile" title="فتح صور أو ملفات نصية أو PDF أو إكسل أو نسخة iptvnator">📂 فتح ملف</button>
+    <input type="file" id="file" accept=".txt,.m3u,.m3u8,.csv,.json,.xlsx,.pdf,application/pdf,image/*" multiple hidden>
     <button class="sec" id="btnPaste" title="لصق محتوى الحافظة في مساحة الإدخال">📋 لصق</button>
-    <button class="sec" id="btnClearText">🧹 مسح الكتابة</button>
-    <button class="sec" id="btnClear">🗑 مسح الكل</button>
-    <span style="flex:1"></span>
-    <label class="opt">عدد الفحوص المتزامنة <input type="number" id="conc" value="8" min="1" max="50"></label>
-    <label class="opt">المهلة بالثواني <input type="number" id="tmo" value="15" min="3" max="120"></label>
-    <label class="opt"><input type="checkbox" id="ara"> الصور فيها كتابة عربية</label>
+    <button class="sec" id="btnClearText" title="مسح النص فقط — الجدول يبقى">🧹 مسح النص</button>
+    <button class="sec" id="btnClear" title="مسح كل السيرفرات والنص">🗑 مسح الكل</button>
+  </div>
+  <input type="hidden" id="conc" value="8"><input type="hidden" id="tmo" value="15">
+  <div class="row optrow">
     <label class="opt"><input type="checkbox" id="noport" checked> تجاهل المنفذ (بعد :) عند حذف المكرر</label>
     <label class="opt"><input type="checkbox" id="retryproxy"> أعد تجربة غير العاملة عبر VPN أمريكي</label>
     <label class="opt" title="يجرّب بث 2-3 قنوات فعلياً ويقيس الجودة (أبطأ)"><input type="checkbox" id="deep"> فحص بث فعلي (عميق)</label>
@@ -2825,7 +2827,10 @@ http://example.com:8080/live/USER/PASS/12345.ts"></textarea>
     <button class="sec" id="bkM3u">📃 ملف M3U</button>
     <button class="sec" id="bkLinks">📋 نسخ الروابط</button>
     <button class="sec" id="bkUa">🪪 هوية المشغّل</button>
-    <button class="sec" id="bkUnAdult">🔞 إزالة علامة الكبار</button>
+    <button class="sec" id="bkAddAdult">🔞 إضافة علامة</button>
+    <button class="sec" id="bkUnAdult">🔞 إزالة علامة</button>
+    <button class="sec" id="bkVpnOn">🛡️ إضافة VPN</button>
+    <button class="sec" id="bkVpnOff">🛡️ إزالة VPN</button>
     <button class="danger" id="bkDel">🗑 حذف المحدد</button>
     <button class="sec" id="bkClear">إلغاء التحديد</button>
   </div>
@@ -3004,7 +3009,7 @@ const ST = {
   expired:['منتهي ⌛','s-expired'], invalid:['بيانات خاطئة','s-invalid'],
   blocked:['محظور / معطّل','s-invalid'], offline:['لا يستجيب ❌','s-offline'], error:['خطأ','s-offline']
 };
-const FILTERS = [['all','الإجمالي'],['ok','يعمل'],['expired','منتهي'],['bad','بيانات خاطئة / محظور'],['offline','لا يستجيب / خطأ'],['pending','لم يُفحص'],['viaproxy','تعمل عبر VPN'],['soon7','ينتهي ≤ 7 أيام'],['soon30','ينتهي ≤ 30 يوماً'],['chmatch','📺 يحتوي القنوات المطلوبة'],['adult','🔞 يحتوي محتوى للكبار'],['dups','🔁 السيرفرات المتشابهة']];
+const FILTERS = [['all','الإجمالي'],['ok','يعمل'],['expired','منتهي'],['bad','بيانات خاطئة / محظور'],['offline','لا يستجيب / خطأ'],['pending','لم يُفحص'],['viaproxy','🛡️ VPN'],['soon7','ينتهي ≤ 7 أيام'],['soon30','ينتهي ≤ 30 يوماً'],['chmatch','📺 يحتوي القنوات المطلوبة'],['adult','🔞 يحتوي محتوى للكبار'],['dups','🔁 السيرفرات المتشابهة']];
 const ORDER = {active:0,active_m3u:1,expired:2,blocked:3,invalid:4,offline:5,error:6,checking:7,pending:8};
 let rows = [], seq = 0, stop = false, running = false, filter = 'all', renderQueued = false;
 let SET = {per_domain:2, ffmpeg_path:'', ext_player:'auto', ext_player_path:'', ext_direct:false, updates:true, auto_hours:0, deep_default:false, count_default:false, timeout:15, conc:8};
@@ -3019,6 +3024,7 @@ const COLNAME = {chs:'القنوات المطابقة',user:'المستخدم',p
 const hasCh = () => rows.some(r => r.chs);
 const shownCols = () => COLS.filter(c => !(c[3] && UI.hidden.includes(c[0])) && !(c[0]==='chs' && !hasCh()));
 
+const vpnShown = r => r.vpnMark===true || (!!r.viaProxy && r.vpnMark!==false);
 const grp = s => (s==='active'||s==='active_m3u')?'ok':s==='expired'?'expired':(s==='invalid'||s==='blocked')?'bad':(s==='offline'||s==='error')?'offline':'pending';
 function defaultName(host){
   let h = String(host||'').replace(/^https?:\/\//i,'').replace(/\/.*$/,'').replace(/:\d+$/,'');
@@ -3108,7 +3114,8 @@ function cellHtml(c, r, i){
       const di = dupInfo[r.id];
       const dupBadge = di ? `<span class="dup" title="سيرفر مكرر بمستخدمين مختلفين (${di.count} مرات)">🔁${di.count}</span>${di.best?'<span class="best" title="الأطول صلاحية بين المكرر">⭐</span>':''}` : '';
       const adb = (r.adult && r.adult.adult) ? `<span class="adb" data-act="unadult" title="يحتوي محتوى للكبار:\n${esc(r.adult.hits.slice(0,10).join('\n'))}\n\n(اضغط لإزالة العلامة إن كان التصنيف خاطئاً)">🔞</span>` : '';
-      const via = adb + (r.viaProxy ? `<span class="viap" title="يعمل عبر VPN فقط">🛡️ VPN</span>` : '') + (r.ua ? `<span class="viap" title="هوية مخصصة: ${esc(r.ua)}">🪪</span>` : '');
+      const vpnOn = r.vpnMark===true || (r.viaProxy && r.vpnMark!==false);
+      const via = adb + (vpnOn ? `<span class="viap" data-act="unvpn" style="cursor:pointer" title="${r.viaProxy ? 'يعمل عبر VPN فقط' : 'علامة تذكير: يحتاج VPN'}\n(اضغط لإزالة العلامة)">🛡️ VPN</span>` : '') + (r.ua ? `<span class="viap" title="هوية مخصصة: ${esc(r.ua)}">🪪</span>` : '');
       const t = r.type || 'xtream';
       const ts = `<select class="typesel" title="نوع السيرفر — غيّره ثم أعد الفحص">${TYPES.map(([v,l])=>`<option value="${v}" ${v===t?'selected':''}>${l}</option>`).join('')}</select>`;
       return `<td class="ltr hostcell">${ts}${via}${dupBadge}<input type="text" class="datain ltr" data-id="${r.id}" data-f="host" value="${esc(r.host)}" title="عنوان السيرفر — عدّله ثم أعد الفحص 🔁"></td>`;
@@ -3238,7 +3245,7 @@ function baseList(){
   const q = $('#q').value.trim().toLowerCase();
   const fm = r => {
     if(filter==='all') return true;
-    if(filter==='viaproxy') return !!r.viaProxy;
+    if(filter==='viaproxy') return vpnShown(r);
     if(filter==='chmatch') return !!(r.chs && r.chs.count>0);
     if(filter==='adult') return !!(r.adult && r.adult.adult);
     if(filter==='dups') return !!dupInfo[r.id];
@@ -3261,7 +3268,7 @@ function sortList(list){
 const selected = () => rows.filter(r => r.sel);
 function renderStats(){
   const c = {all:rows.length, ok:0, expired:0, bad:0, offline:0, pending:0, viaproxy:0, soon7:0, soon30:0, chmatch:0, adult:0, dups:0};
-  rows.forEach(r => { c[grp(r.state)]++; if(r.viaProxy) c.viaproxy++; if(r.chs && r.chs.count>0) c.chmatch++; if(r.adult && r.adult.adult) c.adult++; if(dupInfo[r.id]) c.dups++;
+  rows.forEach(r => { c[grp(r.state)]++; if(vpnShown(r)) c.viaproxy++; if(r.chs && r.chs.count>0) c.chmatch++; if(r.adult && r.adult.adult) c.adult++; if(dupInfo[r.id]) c.dups++;
     if(grp(r.state)==='ok' && !r.unlimited && r.days_left!=null && r.days_left>=0){ if(r.days_left<=7) c.soon7++; if(r.days_left<=30) c.soon30++; } });
   const col = {ok:'var(--ok)',expired:'var(--warn)',bad:'var(--bad)',offline:'var(--off)',pending:'var(--mute)',all:'var(--text)',viaproxy:'#6ee7b7',soon7:'var(--warn)',soon30:'var(--warn)',chmatch:'#fbbf24',adult:'#f87171',dups:'#c4b5fd'};
   const anyAdult = rows.some(r => r.adult && r.adult.adult);
@@ -3580,7 +3587,7 @@ $('#bkClear').onclick = () => { rows.forEach(r => r.sel=false); render(); };
 
 // ---------------- حفظ/استيراد المشروع ----------------
 const PROJ_FIELDS = ['host','username','password','type','portal','mac','isFull','m3uurl','rawM3u','m3uKind','title','userState','portalType','exportedId','autoRefresh','state','status','exp_ts','exp_date','days_left',
-  'unlimited','active_cons','max_cons','trial','created','channels','ping_ms','server_tz','message','m3u','viaProxy','proxyUsed','note','quality','kbps','deepMsg','ua','adult','hiddenCats'];
+  'unlimited','active_cons','max_cons','trial','created','channels','ping_ms','server_tz','message','m3u','viaProxy','proxyUsed','note','quality','kbps','deepMsg','ua','adult','hiddenCats','vpnMark'];
 function exportProject(){
   if(!rows.length) return toast('لا توجد سيرفرات لحفظها');
   const payload = {app:'IPTV_Checker', format:1, exported_at:new Date().toISOString(), count:rows.length,
@@ -3693,8 +3700,10 @@ async function loadFiles(list){
   const xlsxs = files.filter(f => /\.xlsx$/i.test(f.name||''));
   for(const f of xlsxs) await importXlsx(f);
   const rest = files.filter(f => !xlsxs.includes(f));
-  const imgs = rest.filter(f => (f.type||'').startsWith('image/') || /\.(png|jpe?g|webp|bmp|gif|heic)$/i.test(f.name||''));
-  const txts = rest.filter(f => !imgs.includes(f));
+  const pdfs = rest.filter(f => f.type==='application/pdf' || /\.pdf$/i.test(f.name||''));
+  const imgs = rest.filter(f => !pdfs.includes(f) && ((f.type||'').startsWith('image/') || /\.(png|jpe?g|webp|bmp|gif|heic)$/i.test(f.name||'')));
+  const txts = rest.filter(f => !imgs.includes(f) && !pdfs.includes(f));
+  for(const f of pdfs) await readPdf(f);
   let loadedTxt = false;
   for(const f of txts){
     const t = await f.text();
@@ -3707,8 +3716,43 @@ async function loadFiles(list){
   if(imgs.length) await ocrFiles(imgs);
 }
 $('#file').onchange = async e => { const l = [...e.target.files]; e.target.value = ''; await loadFiles(l); };
-$('#btnImg').onclick = () => $('#img').click();
-$('#img').onchange = async e => { const l = [...e.target.files]; e.target.value = ''; await ocrFiles(l); };
+
+// ---------------- قراءة ملفات PDF ----------------
+let pdfLibP = null;
+function loadPdfLib(){
+  if(window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  return pdfLibP || (pdfLibP = new Promise((res, rej) => {
+    const sc = document.createElement('script'); sc.src = '/lib/pdf.js';
+    sc.onload = () => { try{ window.pdfjsLib.GlobalWorkerOptions.workerSrc = '/lib/pdf.worker.js'; }catch(e){} res(window.pdfjsLib); };
+    sc.onerror = () => { pdfLibP = null; rej(new Error('تعذّر تحميل قارئ PDF — يحتاج الإنترنت أول مرة فقط')); };
+    document.head.appendChild(sc);
+  }));
+}
+async function readPdf(f){
+  msg('جاري قراءة ملف PDF: ' + (f.name||''));
+  let lib; try{ lib = await loadPdfLib(); }catch(e){ msg(e.message); return; }
+  try{
+    const doc = await lib.getDocument({data: new Uint8Array(await f.arrayBuffer())}).promise;
+    let text = '', scans = [];
+    for(let i = 1; i <= doc.numPages; i++){
+      const page = await doc.getPage(i);
+      const tc = await page.getTextContent();
+      // نص الصفحة سطراً سطراً حسب موضع كل جزء
+      const lines = {}; tc.items.forEach(it => { const y = Math.round(it.transform[5]); (lines[y] = lines[y] || []).push(it); });
+      const pageText = Object.keys(lines).sort((a,b) => b-a).map(y => lines[y].sort((a,b) => a.transform[4]-b.transform[4]).map(it => it.str).join(' ')).join('\n').trim();
+      if(pageText.length > 10) text += '\n' + pageText;
+      else {                                                          // صفحة مصوّرة — تُقرأ كصورة
+        const vp = page.getViewport({scale: 2}); const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height;
+        await page.render({canvasContext: c.getContext('2d'), viewport: vp}).promise;
+        const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+        if(blob){ blob.name = `${f.name||'pdf'} — صفحة ${i}`; scans.push(blob); }
+      }
+    }
+    if(text.trim()){ $('#inp').value += ($('#inp').value ? '\n' : '') + `# ---- ${f.name||'PDF'} ----\n` + text.trim(); toast('تمت قراءة ملف PDF'); }
+    if(scans.length) await ocrFiles(scans);
+    else { const before = rows.length; await doExtract(); msg(`تمت قراءة ${f.name||'PDF'} واستخراج ${rows.length - before} حساب جديد.`); }
+  }catch(e){ msg('تعذّرت قراءة ملف PDF: ' + (e.message||e)); }
+}
 
 // ---------------- قراءة الصور (OCR) ----------------
 let ocrLib = null, ocrBusy = false;
@@ -3758,12 +3802,12 @@ function cleanOcr(t){
 async function ocrFiles(files){
   if(!files.length) return;
   if(ocrBusy) return toast('جاري قراءة صور أخرى، انتظر قليلاً');
-  ocrBusy = true; $('#btnImg').disabled = true;
+  ocrBusy = true; $('#btnFile').disabled = true;
   let cur = 0;
   try{
     msg('جاري تجهيز قارئ الصور (أول مرة فقط قد يستغرق دقيقة)...');
     const T = await loadTesseract();
-    const langs = $('#ara').checked ? 'eng+ara' : 'eng';
+    const langs = 'eng';
     const worker = await T.createWorker(langs, 1, {logger: m => {
       if(m.status === 'recognizing text') msg(`جاري قراءة الصورة ${cur} من ${files.length}: ${Math.round(m.progress*100)}%`);
     }});
@@ -3784,7 +3828,7 @@ async function ocrFiles(files){
     const n = rows.length - before;
     msg(`تمت قراءة ${files.length} صورة واستخراج ${n} حساب جديد. راجع النص في المربع قبل الفحص — القراءة الآلية قد تخلط بين حروف متشابهة مثل O و 0 أو l و I.`);
   }catch(e){ msg(e.message || String(e)); }
-  finally{ ocrBusy = false; $('#btnImg').disabled = false; }
+  finally{ ocrBusy = false; $('#btnFile').disabled = false; }
 }
 document.addEventListener('paste', e => {
   const imgs = [...(e.clipboardData?.items || [])].filter(i => i.type.startsWith('image/')).map(i => i.getAsFile()).filter(Boolean);
@@ -4601,6 +4645,20 @@ function unAdult(list, noConfirm){
   render(); toast(`تمت إزالة العلامة من ${list.length} سيرفر`);
 }
 $('#bkUnAdult').onclick = () => unAdult(selected());
+function addAdult(list){
+  list.forEach(r => { r.adult = {adult:true, hits:['أُضيفت يدوياً'], manual:true}; });
+  render(); toast(`أُضيفت علامة 🔞 إلى ${list.length} سيرفر`);
+}
+$('#bkAddAdult').onclick = () => addAdult(selected());
+// علامة 🛡️ VPN للتذكير فقط — لا تغيّر طريقة الاتصال
+function setVpnMark(list, on){
+  if(!list.length) return;
+  if(!on && list.length===1 && !confirm('إزالة علامة 🛡️ VPN من هذا السيرفر؟\n(علامة تذكير فقط — لا تغيّر طريقة الاتصال)')) return;
+  list.forEach(r => { r.vpnMark = on; });
+  render(); toast(on ? `أُضيفت علامة 🛡️ إلى ${list.length} سيرفر` : `أُزيلت علامة 🛡️ من ${list.length} سيرفر`);
+}
+$('#bkVpnOn').onclick = () => setVpnMark(selected(), true);
+$('#bkVpnOff').onclick = () => setVpnMark(selected(), false);
 async function detectUa(r, stream){
   return api('/api/ua_detect', checkPayload(r, {stream: stream!==false, timeout: 10}));
 }
@@ -4642,6 +4700,8 @@ $('#tb').onclick = async e => {
     delRows(grpRows.filter(r => !keep.includes(r)).map(r => r.id));
     return;
   }
+  const vb = e.target.closest('[data-act=unvpn]');
+  if(vb){ const r = rows.find(x => x.id === +vb.closest('tr').dataset.id); if(r) setVpnMark([r], false); return; }
   const ub = e.target.closest('[data-act=unadult]');
   if(ub){ const r = rows.find(x => x.id === +ub.closest('tr').dataset.id); if(r) unAdult([r]); return; }
   const b = e.target.closest('button'); if(!b) return;
@@ -4812,7 +4872,9 @@ async function openDetails(r){
     cell('الاستجابة', r.ping_ms!=null ? r.ping_ms+' ms':''), cell('التقييم', scoreOf(r) ?? ''), cell('عدد القنوات', tnum(r.channels)), cell('المنطقة الزمنية', esc(r.server_tz||'')),
     cell('محتوى للكبار', (r.adult ? (r.adult.adult ? '🔞 نعم — ' + esc(r.adult.hits.slice(0,6).join('، ')) : (r.adult.manual ? 'لا (أُزيلت العلامة يدوياً)' : 'لا')) : 'لم يُفحص') +
       (r.adult && r.adult.adult ? ' <button class="sec" id="dtUnAdult" style="padding:2px 8px;font-size:12px">إزالة العلامة</button>' : '') +
-      (r.adult && r.adult.manual ? ' <button class="sec" id="dtReAdult" style="padding:2px 8px;font-size:12px">إعادة الفحص التلقائي</button>' : '')),
+      (r.adult && r.adult.manual ? ' <button class="sec" id="dtReAdult" style="padding:2px 8px;font-size:12px">إعادة الفحص التلقائي</button>' : '') +
+      (!(r.adult && r.adult.adult) ? ' <button class="sec" id="dtAddAdult" style="padding:2px 8px;font-size:12px">إضافة علامة 🔞</button>' : '')),
+    cell('علامة VPN', (vpnShown(r) ? '🛡️ موجودة' : 'لا') + ` <button class="sec" id="dtVpn" style="padding:2px 8px;font-size:12px">${vpnShown(r) ? 'إزالة العلامة' : 'إضافة علامة 🛡️'}</button>`),
     cell('العنوان الفعلي', esc(r.base||'')), cell('ملاحظة العنوان', esc(r.scheme_note||''))].join('');
   const hist = (r.hist||[]).slice().reverse().map(h => `<tr><td>${new Date(h.t*1000).toLocaleString()}</td><td>${esc((ST[h.s]||ST.error)[0])}</td><td>${h.e?new Date(h.e*1000).toLocaleDateString():'—'}</td><td>${h.ms!=null?h.ms+' ms':'—'}</td></tr>`).join('');
   const deep = r.deepRes ? `<h4>الفحص العميق: <span class="b ${(QL[r.quality]||[])[1]||''}">${(QL[r.quality]||['—'])[0]}</span> <span class="small">${esc(r.deepMsg||'')}</span></h4><table class="tbl2"><tr><th>القناة</th><th>نجح</th><th>TTFB</th><th>kbps</th><th>ملاحظة</th></tr>${(r.deepRes.samples||[]).map(s => `<tr><td>${esc(s.name||'')}</td><td>${s.ok?'✅':'❌'}</td><td>${s.ttfb!=null?s.ttfb+' ms':'—'}</td><td>${s.kbps ?? '—'}</td><td>${esc(s.why||'')}</td></tr>`).join('')}</table>` : '';
@@ -4821,6 +4883,8 @@ async function openDetails(r){
     <div class="row" style="margin-top:12px"><button id="dtDeep" class="sec">⚡ فحص بث فعلي الآن</button><button id="dtUa" class="sec">🪪 هوية المشغّل: ${esc(uaName(r.ua))}</button></div>`;
   $('#dtUa').onclick = () => openUa([r]);
   const ua1 = $('#dtUnAdult'); if(ua1) ua1.onclick = () => { unAdult([r], true); openDetails(r); };
+  const ua3 = $('#dtAddAdult'); if(ua3) ua3.onclick = () => { addAdult([r]); openDetails(r); };
+  $('#dtVpn').onclick = () => { setVpnMark([r], !vpnShown(r)); openDetails(r); };
   const ua2 = $('#dtReAdult'); if(ua2) ua2.onclick = async () => { delete r.adult; ua2.disabled = true; await adultOne(r, 20); render(); openDetails(r); };
   $('#dtDeep').disabled = t!=='xtream' || grp(r.state)!=='ok';
   $('#dtDeep').onclick = async () => { $('#dtDeep').disabled = true; await deepOne(r, 20); touch(r); openDetails(r); };
