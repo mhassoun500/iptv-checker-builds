@@ -32,7 +32,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-VERSION = "7.5.3"
+VERSION = "7.6"
 UA = "VLC/3.0.20 LibVLC/3.0.20"
 DEFAULT_TIMEOUT = 15
 
@@ -2581,10 +2581,13 @@ tr.drop-into td{box-shadow:inset 0 2px 0 var(--acc)}
 .acts .icon{display:inline-block}
 tr.currow td{background:#1e3a5f !important;box-shadow:inset 0 1px 0 var(--acc),inset 0 -1px 0 var(--acc)}
 tr.selrow td{background:#16273a}
-.acts .ar{display:flex;justify-content:flex-start;flex-wrap:nowrap;align-items:center}
-.acts .ar .icon{flex:none}
-.acts .icon[data-act=del]{color:#fff;background:#b91c1c;border-radius:5px;font-weight:700;padding:1px 7px;margin-inline-start:auto}
-.acts .icon[data-act=del]:hover{background:#dc2626}
+.acts .ag{display:grid;grid-template-columns:repeat(4,24px);grid-auto-rows:22px;gap:3px;justify-content:start}
+.acts .ag .icon{width:24px;height:22px;padding:0;display:flex;align-items:center;justify-content:center;border-radius:5px;background:#1c2530;border:1px solid #2a3644;font-size:12px;line-height:1;color:#cbd5e1}
+.acts .ag .icon:hover{background:#2a3644;color:#fff}
+.acts .ag .ap{background:#16a34a;border-color:#16a34a;color:#fff;font-size:11px}
+.acts .ag .ap:hover{background:#22c55e}
+.acts .ag .ad{background:#b91c1c;border-color:#b91c1c;color:#fff;font-weight:700}
+.acts .ag .ad:hover{background:#dc2626}
 .namein{width:100%;min-width:0;background:#0a0e12;border:1px solid var(--line);color:var(--text);border-radius:6px;padding:5px 7px;font-weight:600}
 .namein:hover{border-color:var(--mute)}
 .namein:focus{background:#0a0e12;border-color:var(--acc);outline:none}
@@ -3022,7 +3025,7 @@ let UI = {hidden:['conn','msg'], vol:1, favs:{}, recents:{}, resume:{}, lastAuto
 const COLS = [
   ['sel','☑',34,false],['n','#',76,false],['st','الحالة',106,false],['host','السيرفر',170,false],['user','المستخدم',90,true],['pass','كلمة المرور',90,true],
   ['exp','الانتهاء',96,true],['days','الأيام',88,true],['conn','الاتصالات',80,true],['ping','الاستجابة',90,true],['q','الجودة',88,true],['score','التقييم',78,true],
-  ['chs','القنوات المطابقة',110,true],['note','وسوم / ملاحظة',90,true],['msg','ملاحظات الفحص',110,true],['name','الاسم في iptvnator',100,true],['acts','',150,false]
+  ['chs','القنوات المطابقة',110,true],['note','وسوم / ملاحظة',90,true],['msg','ملاحظات الفحص',110,true],['name','الاسم في iptvnator',100,true],['acts','',124,false]
 ];
 const COLNAME = {chs:'القنوات المطابقة',user:'المستخدم',pass:'كلمة المرور',exp:'تاريخ الانتهاء',days:'الأيام المتبقية',conn:'الاتصالات',ping:'الاستجابة',q:'جودة البث',score:'التقييم',note:'وسوم / ملاحظة',msg:'ملاحظات الفحص',name:'الاسم في iptvnator'};
 const hasCh = () => rows.some(r => r.chs);
@@ -3051,8 +3054,13 @@ function toast(t, label, fn, ms){
   if(fn){ const b=document.createElement('button'); b.className='tbtn'; b.textContent=label; b.onclick=()=>{ el.classList.remove('on'); fn(); }; el.appendChild(b); }
   clearTimeout(toast._t); toast._t=setTimeout(()=>el.classList.remove('on'), ms || (fn ? 9000 : 1800));
 }
+// طلبات الفحص تُلغى فوراً عند الضغط على «إيقاف» بدل انتظار انتهاء مهلتها
+let runCtl = new AbortController();
+const ABORTABLE = new Set(['/api/check','/api/ua_detect','/api/adult','/api/deep','/api/chsearch','/api/find_proxies']);
 async function api(path, body){
-  const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json','X-IPTV-Checker':'1'}, body:JSON.stringify(body||{})});
+  const opt = {method:'POST', headers:{'Content-Type':'application/json','X-IPTV-Checker':'1'}, body:JSON.stringify(body||{})};
+  if(ABORTABLE.has(path)){ if(stop && running) throw new Error('أُوقف'); opt.signal = runCtl.signal; }
+  const r = await fetch(path, opt);
   if(!r.ok) throw new Error('HTTP '+r.status);
   return r.json();
 }
@@ -3149,7 +3157,7 @@ function cellHtml(c, r, i){
     case 'note': return `<td><input type="text" class="notein" data-id="${r.id}" value="${esc(r.note||'')}" placeholder="#وسم أو ملاحظة"></td>`;
     case 'msg': return `<td class="small note" title="${esc(r.message||'')}${r.scheme_note?' — '+esc(r.scheme_note):''}">${esc(r.message||'')}</td>`;
     case 'name': return `<td><input type="text" class="namein ltr" data-id="${r.id}" value="${esc(r.title || defaultName(r.host))}" placeholder="${esc(defaultName(r.host))}" title="اسم السيرفر عند التصدير إلى iptvnator"></td>`;
-    case 'acts': return `<td class="acts"><div class="ar"><button class="icon" data-act="play" title="تشغيل / معاينة">▶️</button><button class="icon" data-act="info" title="تفاصيل">🔍</button><button class="icon" data-act="copy" title="نسخ رابط M3U">📋</button><button class="icon" data-act="del" title="حذف السيرفر">✕</button></div><div class="ar"><button class="icon" data-act="up" title="للأعلى">▲</button><button class="icon" data-act="down" title="للأسفل">▼</button><button class="icon" data-act="re" title="إعادة الفحص">🔁</button></div></td>`;
+    case 'acts': return `<td class="acts"><div class="ag"><button class="icon ap" data-act="play" title="تشغيل / معاينة">▶</button><button class="icon" data-act="info" title="تفاصيل">🔍</button><button class="icon" data-act="copy" title="نسخ رابط M3U">📋</button><button class="icon ad" data-act="del" title="حذف السيرفر">✕</button><button class="icon" data-act="up" title="للأعلى">▲</button><button class="icon" data-act="down" title="للأسفل">▼</button><button class="icon" data-act="re" title="إعادة الفحص">🔁</button></div></td>`;
   }
   return '<td></td>';
 }
@@ -3163,16 +3171,17 @@ function renderHead(){
   // كل الأعمدة تُوزَّع على عرض الشاشة بالضبط — بلا تمرير أفقي
   const FLEX = {host:3, user:1.2, pass:1.2, msg:1.8, note:1.1, name:1.4};
   const FMIN = {host:110, user:64, pass:64, msg:80, note:60, name:70};
-  const W = Math.max(320, ($('.tw').clientWidth || window.innerWidth) - 2);
-  const fixedCols = cols.filter(c => !FLEX[c[0]]), flexCols = cols.filter(c => FLEX[c[0]]);
+  const ACTW = 124, hasActs = cols.some(c => c[0]==='acts');          // عمود الأزرار بعرض ثابت لا يُصغَّر
+  const W = Math.max(320, ($('.tw').clientWidth || window.innerWidth) - 2) - (hasActs ? ACTW : 0);
+  const fixedCols = cols.filter(c => !FLEX[c[0]] && c[0]!=='acts'), flexCols = cols.filter(c => FLEX[c[0]]);
   const fixedSum = fixedCols.reduce((a,c) => a + c[2], 0);
   const flexMin = flexCols.reduce((a,c) => a + FMIN[c[0]], 0), flexW = flexCols.reduce((a,c) => a + FLEX[c[0]], 0) || 1;
   let k = 1;                                                        // معامل تصغير الأعمدة الثابتة عند ضيق الشاشة
   if(fixedSum + flexMin > W) k = Math.max(0.55, (W - flexMin) / fixedSum);
   const extra = Math.max(0, W - fixedSum*k - flexMin);
-  const wOf = c => FLEX[c[0]] ? FMIN[c[0]] + extra*FLEX[c[0]]/flexW : c[2]*k;
+  const wOf = c => c[0]==='acts' ? 0 : FLEX[c[0]] ? FMIN[c[0]] + extra*FLEX[c[0]]/flexW : c[2]*k;
   const total = cols.reduce((a,c) => a + wOf(c), 0), k2 = total > W ? W/total : 1;
-  $('#cg').innerHTML = cols.map(c => `<col style="width:${Math.floor(wOf(c)*k2)}px">`).join('');
+  $('#cg').innerHTML = cols.map(c => `<col style="width:${c[0]==='acts' ? ACTW : Math.floor(wOf(c)*k2)}px">`).join('');
   const tb = $('#cg').closest('table'); tb.style.minWidth = ''; tb.classList.toggle('tight', k < 0.95 || k2 < 1); tb.classList.toggle('xtight', k < 0.75 || k2 < 0.95);
   const cf = UI.colf || {};
   $('#hr').innerHTML = cols.map(c => c[0]==='sel' ? '<th><input type="checkbox" id="selAll" title="تحديد الكل"></th>'
@@ -3378,16 +3387,22 @@ async function doExtract(){
   return current;
 }
 
+function restoreStopped(list){            // ما كان قيد الفحص لحظة الإيقاف يعود لحالته السابقة
+  list.forEach(r => { if(r.state==='checking'){ const p = r._prev || {}; r.state = p.state && p.state!=='checking' ? p.state : 'pending'; r.message = p.message || 'أُوقف الفحص'; } r.deepBusy = false; delete r._prev; });
+}
 async function checkOne(r, timeout, count, deep){
+  r._prev = {state:r.state, message:r.message};
   r.state = 'checking'; r.message = ''; touch(r);
   try {
     const out = await api('/api/check', checkPayload(r, {timeout, count}));
     const keepQ = {quality:r.quality, kbps:r.kbps, deepMsg:r.deepMsg};
     Object.assign(r, out);
     if(!deep) Object.assign(r, keepQ);
-  } catch(e){ r.state = 'error'; r.message = 'تعذر الاتصال بالأداة: ' + e.message; }
+  } catch(e){ if(stop){ restoreStopped([r]); touch(r); return; } r.state = 'error'; r.message = 'تعذر الاتصال بالأداة: ' + e.message; }
+  delete r._prev;
+  if(stop){ touch(r); return; }
   if(deep && grp(r.state)==='ok' && (r.type||'xtream')==='xtream') await deepOne(r, timeout);
-  if(grp(r.state)!=='ok' && r.http_code && !r.ua && SET.ua_auto!==false){   // رفض السيرفر — جرّب هويات أخرى
+  if(!stop && grp(r.state)!=='ok' && r.http_code && !r.ua && SET.ua_auto!==false){   // رفض السيرفر — جرّب هويات أخرى
     r.message = (r.message||'') + ' — جاري تجربة هويات مشغّل أخرى...'; touch(r);
     try{
       const d = await api('/api/ua_detect', checkPayload(r, {stream:false, timeout: Math.min(10, timeout||10)}));
@@ -3399,7 +3414,7 @@ async function checkOne(r, timeout, count, deep){
       } else { r.message = String(r.message||'').replace(' — جاري تجربة هويات مشغّل أخرى...', ''); }
     }catch(e){}
   }
-  if(grp(r.state)==='ok' && SET.adult_scan!==false) await adultOne(r, timeout);
+  if(!stop && grp(r.state)==='ok' && SET.adult_scan!==false) await adultOne(r, timeout);
   touch(r);
 }
 async function adultOne(r, timeout){
@@ -3414,7 +3429,7 @@ async function deepOne(r, timeout){
   try{
     const d = await api('/api/deep', {host:r.host, username:r.username, password:r.password, timeout:timeout||15, proxy:proxyOf(r), ua:r.ua||''});
     r.quality = d.quality; r.kbps = d.kbps; r.ttfb = d.ttfb_ms; r.deepMsg = d.message || ''; r.deepRes = d;
-  }catch(e){ r.deepMsg = 'تعذر الفحص العميق'; }
+  }catch(e){ if(!stop) r.deepMsg = 'تعذر الفحص العميق'; }
   r.deepBusy = false;
 }
 
@@ -3431,12 +3446,14 @@ async function runChecks(list){
     while(!stop && i < list.length){
       const r = list[i++];
       await checkOne(r, timeout, count, deep);
+      if(stop) break;
       done++;
       $('#bar').style.width = (done/total*100).toFixed(1) + '%';
       msg(`تم فحص ${done} من ${total}`);
     }
   }
   await Promise.all(Array.from({length:Math.min(conc, total)}, worker));
+  if(stop) restoreStopped(list);
   const ok = list.filter(r => grp(r.state)==='ok').length;
   msg(stop ? `تم الإيقاف بعد فحص ${done} من ${total}.` : `انتهى الفحص: ${ok} يعمل من أصل ${total}.`);
   render();
@@ -3469,6 +3486,7 @@ async function retryViaProxy(failed){
   async function w(){
     while(!stop && i < failed.length){
       const r = failed[i++];
+      r._prev = {state:r.state, message:r.message};
       let best = null, usedPx = '';
       for(const px of proxies){
         if(stop) break;
@@ -3492,6 +3510,7 @@ async function retryViaProxy(failed){
     }
   }
   await Promise.all(Array.from({length:Math.min(conc, total)}, w));
+  if(stop){ restoreStopped(failed); msg(`تم إيقاف إعادة المحاولة عبر VPN — نجح ${fixed} من ${done}.`); return; }
   msg(`انتهت إعادة المحاولة عبر VPN: ${fixed} سيرفراً يعمل من أصل ${total} — جُرّب ${proxies.length} بروكسي.`);
 }
 
@@ -3568,7 +3587,7 @@ $('#btnGo').onclick = async () => {
 };
 $('#btnCheckAll').onclick = () => { if(!rows.length) return toast('لا توجد سيرفرات في القائمة'); runChecks(rows.slice()); };
 $('#btnExtract').onclick = doExtract;
-$('#btnStop').onclick = () => { stop = true; msg('جاري الإيقاف...'); };
+$('#btnStop').onclick = () => { if(!running) return; stop = true; msg('جاري الإيقاف...'); try{ runCtl.abort(); }catch(e){} runCtl = new AbortController(); $('#btnStop').disabled = true; };
 $('#btnClearText').onclick = () => { $('#inp').value=''; $('#inp').focus(); msg('تم مسح النص فقط — النتائج في الجدول باقية.'); };
 $('#btnClear').onclick = () => {
   if(!rows.length){ $('#inp').value=''; return; }
@@ -4555,7 +4574,7 @@ $('#btnChSearch').onclick = async () => {
         const out = await api('/api/chsearch', checkPayload(r, {terms, verify, force, kinds, timeout: Math.max(20, +$('#tmo').value || 15)}));
         r.chs = Object.assign(out, {terms, at: Date.now()});
         if(out.count>0) found++;
-      }catch(e){ r.chs = {error:'تعذّر الاتصال بالأداة', terms}; }
+      }catch(e){ if(stop){ delete r.chs; touch(r); break; } r.chs = {error:'تعذّر الاتصال بالأداة', terms}; }
       done++; $('#bar').style.width = (done/total*100).toFixed(1)+'%';
       msg(`البحث في المحتوى: ${done}/${total} — وُجدت في ${found} سيرفر`);
       touch(r);
