@@ -32,7 +32,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-VERSION = "7.6"
+VERSION = "7.7"
 UA = "VLC/3.0.20 LibVLC/3.0.20"
 DEFAULT_TIMEOUT = 15
 
@@ -2835,6 +2835,7 @@ http://example.com:8080/live/USER/PASS/12345.ts"></textarea>
     <button class="sec" id="bkUa">🪪 هوية المشغّل</button>
     <button class="sec" id="bkAddAdult">🔞 إضافة علامة</button>
     <button class="sec" id="bkUnAdult">🔞 إزالة علامة</button>
+    <button class="sec" id="bkAutoAdult" title="إلغاء العلامة اليدوية وإعادة فحص محتوى الكبار تلقائياً">🔞 فحص تلقائي</button>
     <button class="sec" id="bkVpnOn">🛡️ إضافة VPN</button>
     <button class="sec" id="bkVpnOff">🛡️ إزالة VPN</button>
     <button class="danger" id="bkDel">🗑 حذف المحدد</button>
@@ -4674,6 +4675,32 @@ function addAdult(list){
   render(); toast(`أُضيفت علامة 🔞 إلى ${list.length} سيرفر`);
 }
 $('#bkAddAdult').onclick = () => addAdult(selected());
+// يلغي القرار اليدوي ويترك الفحص التلقائي يقرر من جديد
+async function autoAdult(list){
+  if(!list.length) return toast('حدّد سيرفرات أولاً');
+  if(running) return toast('انتظر حتى ينتهي الفحص الجاري');
+  const ok = list.filter(r => grp(r.state)==='ok'), skip = list.length - ok.length;
+  list.forEach(r => { delete r.adult; });
+  render();
+  if(!ok.length){ toast('أُلغيت العلامة اليدوية — السيرفرات غير العاملة تُفحص عند إعادة فحصها'); return; }
+  running = true; stop = false; setBtns();
+  const tmo = Math.max(15, +$('#tmo').value || 15), conc = Math.max(1, Math.min(10, +$('#conc').value || 6));
+  let i = 0, done = 0, flagged = 0; $('#bar').style.width = '0%';
+  async function w(){
+    while(!stop && i < ok.length){
+      const r = ok[i++]; r.adultBusy = true; touch(r);
+      await adultOne(r, tmo);
+      r.adultBusy = false; done++; if(r.adult && r.adult.adult) flagged++;
+      $('#bar').style.width = (done/ok.length*100).toFixed(1)+'%';
+      msg(`فحص محتوى الكبار: ${done}/${ok.length} — عليها علامة 🔞: ${flagged}`); touch(r);
+    }
+  }
+  await Promise.all(Array.from({length:Math.min(conc, ok.length)}, w));
+  ok.forEach(r => { r.adultBusy = false; });
+  running = false; setBtns(); render();
+  msg((stop ? 'أُوقف فحص محتوى الكبار — ' : 'انتهى فحص محتوى الكبار — ') + `عليها علامة 🔞: ${flagged} من ${done}` + (skip ? ` (و${skip} غير عاملة أُلغيت علامتها اليدوية فقط)` : ''));
+}
+$('#bkAutoAdult').onclick = () => autoAdult(selected());
 // علامة 🛡️ VPN للتذكير فقط — لا تغيّر طريقة الاتصال
 function setVpnMark(list, on){
   if(!list.length) return;
